@@ -56,6 +56,9 @@ class MSELoss(Function):
 
     def backward(self, dout=1):
         dx = 2 * self.diff / len(self.diff)
+        
+        xp = get_array_module(self.diff)
+        dout = to_xp(dout, xp)
         return as_Tensor(dx) * dout
 
 class SoftmaxWithLoss(Function):
@@ -92,6 +95,7 @@ class SoftmaxWithLoss(Function):
             dx[xp.arange(batchSize), self.t.flatten()] -= 1
             dx = dx / batchSize
             
+        dout = to_xp(dout, xp)
         return as_Tensor(dx) * dout
 
 class SigmoidWithLoss(Function):
@@ -117,6 +121,9 @@ class SigmoidWithLoss(Function):
     def backward(self, dout=1):
         batchSize = self.t.shape[0]
         dx = (self.y - self.t) / batchSize
+
+        xp = get_array_module(self.y)
+        dout = to_xp(dout, xp)
         return as_Tensor(dx) * dout
 
 class CrossEntropyLoss(Function):
@@ -160,6 +167,7 @@ class CrossEntropyLoss(Function):
         else:
             dx = (xp.exp(self.logSoftmax) - self.t) / batchSize
         
+        dout = to_xp(dout, xp)
         #tmp = as_Tensor(dx) * dout
         return as_Tensor(dx) * dout
 

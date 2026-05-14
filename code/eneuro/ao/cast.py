@@ -5,13 +5,14 @@ import numpy as np
 
 from ..base.core import Tensor, Function, Config
 from ..nn.optim import Optimizer
+from ..base.functions import to_xp, get_array_module
 
 @contextmanager
-def autocast_context(dtype = np.float16):
+def autocast_context(dtype = 'float16'):
     """
     上下文管理器：在此上下文中自动启用混合精度。
     用法：
-        with autocast_context(np.float16):
+        with autocast_context('float16'):
             y_hat = model(Tensor(X))
             loss = loss_fn(y_hat, Tensor(y))
     """
@@ -32,7 +33,7 @@ class GradScaler:
     用例：
     scaler = GradScaler()  # 损失缩放器
     for input, target in data:
-        with autocast(dtype=torch.float16):   # 前向：低精度
+        with autocast(dtype='float16'):   # 前向：低精度
             output = model(input)
             loss = loss_fn(output, target)
 
@@ -59,7 +60,9 @@ class GradScaler:
         for param in optimizer.params:
             if param.grad is None:
                 continue
-            if (np.isinf(param.grad.data) | np.isnan(param.grad.data)).any():
+
+            xp = get_array_module(param.grad.data)
+            if (xp.isinf(param.grad.data) | xp.isnan(param.grad.data)).any():
                 has_overflow = True
                 break
 
@@ -78,7 +81,8 @@ class GradScaler:
             for param in optimizer.params:
                 if param.grad is None:
                     continue
-                param.grad.data /= self.scale_factor
+                xp = get_array_module(param.grad.data)
+                param.grad.data /= xp.asarray(self.scale_factor)
             optimizer.step()
 
             # 连续未溢出则放大缩放倍数

@@ -20,7 +20,7 @@ size = 32
 X = np.random.randn(2, 3, size, size).astype(np.float32)  # 2张3通道图像
 y = np.array([0, 5], dtype=np.int32)                   # 2个样本的标签，范围[0, 9]
 
-num_fuse = 5
+num_fuse = 1
 sequential_content = []
 for i in range(num_fuse):
     sequential_content.append(Conv2d(3,3))
@@ -34,6 +34,7 @@ sequential_content.append(Linear(10))
 def test_normal(epoch_num = 10):
     # 创建模型
     model = Sequential(*sequential_content)
+    model.to('cuda')
 
     # 创建损失函数和优化器
     loss_fn = CrossEntropyLoss()
@@ -60,6 +61,7 @@ def test_normal(epoch_num = 10):
 def test_executor(epoch_num = 10):
     # 创建模型
     model = Sequential(*sequential_content)
+    model.to('cuda')
 
     # 执行一次前向，记录计算图
     sample_input = Tensor(X)
@@ -92,6 +94,7 @@ def test_ao(epoch_num = 10):
     from eneuro.ao import GraphOptimizer
     # 创建模型
     model = Sequential(*sequential_content)
+    model.to('cuda')
 
     # 执行一次前向，记录并优化计算图（得到优化后的 executor）
     sample_input = Tensor(X) # 样例输入
@@ -208,10 +211,10 @@ def pattern_registry():
     # 注册模式与替换的融合算子
     FusionRegistry.register(fusion_pattern, F.FusedConvReLU)
 
-def test_autocast_normal(epoch_num = 10):
+def test_autocast_normal(epoch_num = 10, dtype = 'float16'):
     # 创建模型
     model = Sequential(*sequential_content)
-
+    model.to('cuda')
     # 创建损失函数和优化器
     loss_fn = CrossEntropyLoss()
     optimizer = SGD(model.params(), lr=0.1)
@@ -222,7 +225,7 @@ def test_autocast_normal(epoch_num = 10):
         #print(f"epoch {epoch}")
         #from eneuro.ao import autocast_context, GradScaler
         #scaler = GradScaler()
-        with autocast_context():
+        with autocast_context(dtype=dtype):
             y_hat = model(Tensor(X))
             loss = loss_fn(y_hat, Tensor(y))
 
@@ -238,9 +241,10 @@ def test_autocast_normal(epoch_num = 10):
     #print(f"normal training complete in {duration:.4f}s  loss = {loss}")
     return duration
 
-def test_autocast_executor(epoch_num = 10):
+def test_autocast_executor(epoch_num = 10, dtype = 'float16'):
     # 创建模型
     model = Sequential(*sequential_content)
+    model.to('cuda')
 
     # 执行一次前向，记录计算图
     sample_input = Tensor(X)
@@ -258,7 +262,7 @@ def test_autocast_executor(epoch_num = 10):
     tic = time.time()
     for epoch in range(epoch_num):
         #print(f"epoch {epoch}")
-        with autocast_context():
+        with autocast_context(dtype=dtype):
             y_hat = executor.forward(Tensor(X))
             loss = loss_fn(y_hat, Tensor(y))
         
@@ -270,12 +274,12 @@ def test_autocast_executor(epoch_num = 10):
     #print(f"executor training complete in {duration:.4f}s  loss = {loss}")
     return duration
 
-def test_autocast_ao(epoch_num = 10):
+def test_autocast_ao(epoch_num = 10, dtype = 'float16'):
 
     from eneuro.ao import GraphOptimizer
     # 创建模型
     model = Sequential(*sequential_content)
-
+    model.to('cuda')
     # 执行一次前向，记录并优化计算图（得到优化后的 executor）
     sample_input = Tensor(X) # 样例输入
     op = GraphOptimizer(model, sample_input) # 图优化器
@@ -290,7 +294,7 @@ def test_autocast_ao(epoch_num = 10):
     
     tic = time.time()
     for epoch in range(epoch_num):
-        with autocast_context():
+        with autocast_context(dtype=dtype):
             y_hat = executor.forward(Tensor(X)) # 使用执行器进行前向传播
             loss = loss_fn(y_hat, Tensor(y))
         
@@ -333,9 +337,10 @@ def test_autocast():
     executor_time = test_executor(num_epoch)
     ao_time = test_ao(num_epoch)
 
-    autocast_normal_time = test_autocast_normal(num_epoch)
-    autocast_executor_time = test_autocast_executor(num_epoch)
-    autocast_ao_time = test_autocast_ao(num_epoch)
+    dtype = 'float16'
+    autocast_normal_time = test_autocast_normal(num_epoch, dtype=dtype)
+    autocast_executor_time = test_autocast_executor(num_epoch, dtype=dtype)
+    autocast_ao_time = test_autocast_ao(num_epoch, dtype=dtype)
 
     #'''
     print(f"normal training complete in {normal_time:.4f}s")
