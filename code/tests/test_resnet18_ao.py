@@ -248,7 +248,7 @@ class SteeringDataset(Dataset):
         return idx
 
 def train(num_epoch=10, option='normal', autocast=False):
-    batch_size = 64
+    batch_size = 32
 
     from eneuro.base.core import Tensor
     from eneuro.base.functions import get_array_module, to_xp, has_cupy
@@ -280,7 +280,7 @@ def train(num_epoch=10, option='normal', autocast=False):
 
             if autocast:
                 graph = graph_apply_cast(graph)
-                graph.visualize()
+                #graph.visualize()
             
             executor = graph_to_executor(graph)
             break
@@ -341,19 +341,30 @@ def train(num_epoch=10, option='normal', autocast=False):
 if __name__ == '__main__':
     #test_resnet18_forward_backward()
 
-    normal_t = train(num_epoch=1, option='optim_graph', autocast=False)
-    cast_t = train(num_epoch=1, option='optim_graph', autocast=True)
-    sub = normal_t - cast_t
-    print(f"optim_graph training complete in {normal_t:.4f}s")
-    print(f"autocast optim_graph training complete in {cast_t:.4f}s")
-    print(f"混合精度节约了 {sub * 100 / normal_t:.2f}% 的时间")
-
-    normal_t = train(num_epoch=1, option='graph', autocast=False)
-    cast_t = train(num_epoch=1, option='graph', autocast=True)
-    sub = normal_t - cast_t
-    print(f"graph training complete in {normal_t:.4f}s")
-    print(f"autocast graph training complete in {cast_t:.4f}s")
-    print(f"混合精度节约了 {sub * 100 / normal_t:.2f}% 的时间")
-
+    '''
     normal_t = train(num_epoch=1, option='normal', autocast=False)
     print(f"normal training complete in {normal_t:.4f}s")
+    #'''
+
+    '''
+    normal_t = train(num_epoch=1, option='graph', autocast=False)
+    print(f"graph training complete in {normal_t:.4f}s")
+    #'''
+    '''
+    cast_t = train(num_epoch=1, option='graph', autocast=True)
+    print(f"autocast graph training complete in {cast_t:.4f}s")
+    #'''
+
+    #sub = normal_t - cast_t
+    #print(f"混合精度节约了 {sub * 100 / normal_t:.2f}% 的时间")
+    '''
+    normal_t = train(num_epoch=1, option='optim_graph', autocast=False)
+    print(f"optim_graph training complete in {normal_t:.4f}s")
+    #'''
+    #'''
+    cast_t = train(num_epoch=1, option='optim_graph', autocast=True)
+    print(f"autocast optim_graph training complete in {cast_t:.4f}s")
+    #'''
+
+    #sub = normal_t - cast_t
+    #print(f"混合精度节约了 {sub * 100 / normal_t:.2f}% 的时间")
