@@ -2400,31 +2400,39 @@ class CastRigistry:
     ]
 
 class Cast(Function):
+    def __init__(self, dtype='float16'):
+        super().__init__()
+        self.dtype = dtype
+
     def forward(self, *xs):
+        if len(xs) > 1:
+            raise ValueError("Cast function only supports single input.")
+        x = xs[0]
         # 降低精度
-        current_dtype = Config.current_dtype
-        xs = [x.astype(current_dtype) if x.dtype != current_dtype 
-                  else x 
-                  for x in xs]
-        return tuple(xs)
+        x = x.astype(self.dtype) if x.dtype != self.dtype else x
+        return x
 
     def backward(self, gys):
         return gys
 
 def cast(x):
-    return Cast()(*x)
+    return Cast()(x)
 
 class DeCast(Function):
+    def __init__(self, dtype='float16'):
+        super().__init__()
+        self.dtype = dtype
+
     def forward(self, *xs):
+        if len(xs) > 1:
+            raise ValueError("DeCast function only supports single input.")
+        x = xs[0]
         # 提高精度
-        current_dtype = Config.current_dtype
-        xs = [x.astype('float32') if x.dtype == current_dtype 
-                  else x 
-                  for x in xs]
-        return tuple(xs)
+        x = x.astype('float32') if x.dtype == self.dtype else x 
+        return x
 
     def backward(self, gys):
         return gys
 
 def decast(x):
-    return DeCast()(*x)
+    return DeCast()(x)

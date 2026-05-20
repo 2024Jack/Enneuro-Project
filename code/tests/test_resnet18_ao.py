@@ -17,7 +17,7 @@ from eneuro.nn.module import (
     ResidualBlock,
     Sequential,
 )  # noqa: E402
-from eneuro.ao import GraphOptimizer, GraphExecutor, autocast_context, GradScaler
+from eneuro.ao import GraphOptimizer, model_to_graph, graph_to_executor, graph_apply_fuse, graph_apply_cast, GradScaler
 from eneuro.nn.optim import SGD
 from eneuro.nn.loss import crossEntropyError
 
@@ -251,6 +251,7 @@ def train(num_epoch=10, option='normal', autocast=False):
     batch_size = 64
 
     from eneuro.base.core import Tensor
+    from eneuro.base.functions import get_array_module, to_xp, has_cupy
     from eneuro.data import DataLoader
     import time
     # 实例化数据集
@@ -263,6 +264,7 @@ def train(num_epoch=10, option='normal', autocast=False):
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     model = ResNet18(num_classes=20)
+    model.to('cuda' if has_cupy else 'cpu')
     optimizer = SGD(model.params())
     loss_fn = crossEntropyError
     if autocast:
@@ -272,10 +274,19 @@ def train(num_epoch=10, option='normal', autocast=False):
         for batch_idx, (images, labels) in enumerate(dataloader):
             sample_input = images
             if option == 'graph':
-                executor = GraphExecutor(GraphOptimizer(model,sample_input=sample_input).origin_graph())
+                graph = model_to_graph(model,sample_input=sample_input)
             elif option == 'optim_graph':
-                executor = GraphOptimizer(model,sample_input=sample_input).optimize_to_executor()
+                graph = graph_apply_fuse(model_to_graph(model,sample_input=sample_input))
+
+            if autocast:
+                graph = graph_apply_cast(graph)
+                graph.visualize()
+            
+            executor = graph_to_executor(graph)
             break
+    elif autocast:
+        print("autocast should be used with graph!")
+        return 1e-5
 
     for epoch in range(num_epoch):
         tic = time.time()
@@ -284,16 +295,17 @@ def train(num_epoch=10, option='normal', autocast=False):
         for batch_idx, (images, labels) in enumerate(dataloader):
             # images: Tensor (B, C, H, W) 或 (B, H, W, C)
             # labels: Tensor (B,)
+
+            if images.shape[0] != batch_size:
+                break
+
             if autocast:
-                with autocast_context():
-                    if option == 'normal':
-                        y_pre = model(images) # (B, num_classes)
-                    elif option in ['graph', 'optim_graph']:
-                        y_pre = executor.forward(images)
-                    loss = loss_fn(y_pre, labels)
+                y_pre = executor.forward(images)
+                loss = loss_fn(y_pre, labels)
 
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
+                optimizer.zero_grad()
 
             else:
                 if option == 'normal':
@@ -302,23 +314,23 @@ def train(num_epoch=10, option='normal', autocast=False):
                     y_pre = executor.forward(images)
                 loss = loss_fn(y_pre, labels)
             
-                model.cleargrads()
                 loss.backward()
                 optimizer.step()
+                optimizer.zero_grad()
             
             #assert isinstance(y_pre, Tensor)
-            pred_classes = np.argmax(y_pre.data, axis=1)
-            batch_acc = np.mean(pred_classes == labels.data)
+            pred_classes = np.argmax(y_pre.to('cpu').data, axis=1)
+            batch_acc = np.mean(pred_classes == labels.to('cpu').data)
 
-            loss_sum += loss.data * len(images)
+            loss_sum += loss.to('cpu').data * len(images)
             if not np.isnan(batch_acc):
                 acc_sum += batch_acc * len(images)
             sample_num += len(images)
 
             display_acc = (acc_sum / sample_num) if sample_num > 0 and not np.isnan(acc_sum) else np.nan
-            progress_bar(batch_idx * batch_size + len(images), len(dataloader.dataset), epoch, loss.data, display_acc)
+            progress_bar(batch_idx * batch_size + len(images), len(dataloader.dataset), epoch, loss.to('cpu').data, display_acc)
 
-            break
+            #break
         
         toc = time.time()
         duration = toc - tic
@@ -329,23 +341,19 @@ def train(num_epoch=10, option='normal', autocast=False):
 if __name__ == '__main__':
     #test_resnet18_forward_backward()
 
-    normal_t = train(num_epoch=1, option='normal', autocast=False)
-    cast_t = train(num_epoch=1, option='normal', autocast=True)
-    sub = normal_t - cast_t
-    print(f"normal training complete in {normal_t:.4f}s")
-    print(f"autocast normal training complete in {cast_t:.4f}s")
-    print(f"混合精度节约了 {sub * 100 / normal_t:.2f}% 的时间")
-    
-    normal_t = train(num_epoch=1, option='graph', autocast=False)
-    cast_t = train(num_epoch=1, option='graph', autocast=True)
-    sub = normal_t - cast_t
-    print(f"graph training complete in {normal_t:.4f}s")
-    print(f"autocast graph training complete in {cast_t:.4f}s")
-    print(f"混合精度节约了 {sub * 100 / normal_t:.2f}% 的时间")
-    
     normal_t = train(num_epoch=1, option='optim_graph', autocast=False)
     cast_t = train(num_epoch=1, option='optim_graph', autocast=True)
     sub = normal_t - cast_t
     print(f"optim_graph training complete in {normal_t:.4f}s")
     print(f"autocast optim_graph training complete in {cast_t:.4f}s")
     print(f"混合精度节约了 {sub * 100 / normal_t:.2f}% 的时间")
+
+    normal_t = train(num_epoch=1, option='graph', autocast=False)
+    cast_t = train(num_epoch=1, option='graph', autocast=True)
+    sub = normal_t - cast_t
+    print(f"graph training complete in {normal_t:.4f}s")
+    print(f"autocast graph training complete in {cast_t:.4f}s")
+    print(f"混合精度节约了 {sub * 100 / normal_t:.2f}% 的时间")
+
+    normal_t = train(num_epoch=1, option='normal', autocast=False)
+    print(f"normal training complete in {normal_t:.4f}s")

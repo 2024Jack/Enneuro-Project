@@ -3,9 +3,16 @@ from __future__ import annotations
 from typing import List, Set, Dict, Optional, Any, Tuple, Union
 from enum import Enum, auto
 import weakref
+WEAKREF = weakref.ref
 from collections import deque
 
 from ..base.core import Tensor, Function
+
+def get_obj(obj: Any):
+    if isinstance(obj, WEAKREF):
+        return obj()
+    else:
+        return obj
 
 class NodeType(Enum):
     TENSOR = auto()
@@ -14,14 +21,23 @@ class NodeType(Enum):
 class Node:
     """计算图中的节点，包装 Tensor 或 Function 对象"""
     def __init__(self, obj: Any, node_id: int, node_type: NodeType):
-        self.obj = obj                      # 原始 Tensor 或 Function 实例
+        self.obj = obj                      # 原始 weakref_Tensor 或 Function 实例
         self.id = node_id                   # 唯一标识
         self.type = node_type               # 节点类型
-        self.name = getattr(obj, 'name', None) or obj.__class__.__name__
+        
+        true_obj = self.true_obj
+        self.name = getattr(true_obj, 'name', None) or true_obj.__class__.__name__
         self.params = None
+
+        self.casted = False
+        self.decasted = False
 
     def __repr__(self):
         return f"Node(id={self.id}, type={self.type.name}, name={self.name})"
+    
+    @property
+    def true_obj(self):
+        return get_obj(self.obj)
 
 class Graph:
     """
@@ -49,12 +65,14 @@ class Graph:
         if obj_id in self.obj_to_node:
             return self.obj_to_node[obj_id]
 
-        if isinstance(obj, Tensor):
+        true_obj = get_obj(obj)
+
+        if isinstance(true_obj, Tensor):
             ntype = NodeType.TENSOR
-        elif isinstance(obj, Function):
+        elif isinstance(true_obj, Function):
             ntype = NodeType.FUNCTION
         else:
-            raise TypeError(f"Cannot add node of type {type(obj)}")
+            raise TypeError(f"Cannot add node of type {type(true_obj)}")
 
         nid = self._new_id()
         node = Node(obj, nid, ntype)

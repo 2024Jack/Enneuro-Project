@@ -2,30 +2,121 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import List, Dict, Any, Optional
 import numpy as np
+import weakref
+
+from .graph import Graph, Node, NodeType
 
 from ..base.core import Tensor, Function, Config
 from ..nn.optim import Optimizer
 from ..base.functions import to_xp, get_array_module
+from ..base import functions as f
 
-@contextmanager
-def autocast_context(dtype = 'float16'):
-    """
-    上下文管理器：在此上下文中自动启用混合精度。
-    用法：
-        with autocast_context('float16'):
-            y_hat = model(Tensor(X))
-            loss = loss_fn(y_hat, Tensor(y))
-    """
-    old_autocast_flag = Config.autocast
-    old_dtype = Config.current_dtype
-    
-    Config.autocast = True
-    Config.current_dtype = dtype
-    try:
-        yield
-    finally:
-        Config.autocast = old_autocast_flag
-        Config.current_dtype = old_dtype
+class AutoCastManager:
+    @staticmethod
+    def apply_cast(graph: Graph, dtype: str='float16') -> Graph:
+        # 初始化
+        for node in graph.nodes.values():
+            node.casted = False
+            node.decasted = False
+
+        # 按拓扑序遍历所有 Function 节点
+        for node in graph.topological_order():
+            if node.type != NodeType.FUNCTION: # 排除tensor
+                continue
+
+            func_cls = node.true_obj.__class__
+            # 已有Cast/Decast，则对后继节点（Tensor）进行标记
+            if func_cls in (f.Cast, f.DeCast):
+                suc_nodes = graph.get_successors(node)
+                for suc_node in suc_nodes:
+                    if func_cls == f.Cast:
+                        suc_node.casted = True
+                        suc_node.decasted = False
+                    else:
+                        suc_node.decasted = True
+                        suc_node.casted = False
+                    
+            # 其他Function节点
+            else:
+                # 获取前继节点状态
+                pre_nodes = graph.get_predecessors(node)
+                pre_casted = True
+                for pre in pre_nodes:
+                    if pre.casted == False:
+                        pre_casted = False
+                        break
+
+                pre_decasted = True
+                for pre in pre_nodes:
+                    if pre.decasted == False:
+                        pre_decasted = False
+                        break
+                
+                # 后继节点
+                suc_nodes = graph.get_successors(node)
+
+                # 可以低精度的Function
+                if func_cls in f.CastRigistry.cancast:
+                    # 若输入不是低精度，则添加Cast
+                    if not pre_casted:
+                        '''
+                        pre(Tensor) -> node
+                        变为
+                        pre(Tensor) -> Cast -> Tensor -> node 
+                        '''
+                        # 去除原来的边
+                        graph._remove_edges_to_node(node, keep_set=set(pre_nodes))
+                        for pre in pre_nodes:
+                            # 添加节点
+                            cast_func = f.Cast(dtype=dtype)
+                            tensor = cast_func(pre.true_obj)
+                            cast_node = graph.add_node(cast_func)
+                            tensor_node = graph.add_node(weakref.ref(tensor))
+                            # 添加边
+                            graph.add_edge(pre, cast_node)
+                            graph.add_edge(cast_node, tensor_node)
+                            graph.add_edge(tensor_node, node)
+                    
+                    # 标记后继节点
+                    for suc in suc_nodes:
+                        suc.casted = True
+                        suc.decasted = False
+
+                # 需要高精度的Function
+                elif func_cls in f.CastRigistry.resist_cast:
+                    # 若输入是低精度，则添加Decast
+                    if not pre_decasted:
+                        '''
+                        pre(Tensor) -> node
+                        变为
+                        pre(Tensor) -> DeCast -> Tensor -> node 
+                        '''
+                        # 去除原来的边
+                        graph._remove_edges_to_node(node, keep_set=set(pre_nodes))
+                        for pre in pre_nodes:
+                            # 添加节点
+                            decast_func = f.DeCast(dtype=dtype)
+                            tensor = decast_func(pre.true_obj)
+                            decast_node = graph.add_node(decast_func)
+                            tensor_node = graph.add_node(weakref.ref(tensor))
+                            # 添加边
+                            graph.add_edge(pre, decast_node)
+                            graph.add_edge(decast_node, tensor_node)
+                            graph.add_edge(tensor_node, node)
+                    
+                    # 标记后继节点
+                    for suc in suc_nodes:
+                        suc.casted = False
+                        suc.decasted = True
+                        
+                # 没有要求的Function
+                else:
+                    # 传递标记
+                    for suc in suc_nodes:
+                        suc.casted = pre_casted
+                        suc.decasted = pre_decasted
+
+        return graph
 
 class GradScaler:
     '''
