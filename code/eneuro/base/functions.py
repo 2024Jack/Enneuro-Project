@@ -1472,7 +1472,8 @@ def conv2d_backward_input_array(gy, W, stride=(1, 1), pad=(0, 0), dilation=(1, 1
         out_h = SH * (OH - 1) - 2 * PH + DH * (KH - 1) + 1
         out_w = SW * (OW - 1) - 2 * PW + DW * (KW - 1) + 1
 
-    gx_pad = np.zeros((N, C, out_h + 2 * PH + SH - 1, out_w + 2 * PW + SW - 1), dtype=gy.dtype)
+    xp = get_array_module(W)
+    gx_pad = xp.zeros((N, C, out_h + 2 * PH + SH - 1, out_w + 2 * PW + SW - 1), dtype=gy.dtype)
 
     for kh in range(KH):
         h_start = kh * DH
@@ -1482,7 +1483,7 @@ def conv2d_backward_input_array(gy, W, stride=(1, 1), pad=(0, 0), dilation=(1, 1
             w_end = w_start + SW * OW
 
             # (N, OC, OH, OW) x (OC, C) -> (N, OH, OW, C) -> (N, C, OH, OW)
-            contrib = np.tensordot(gy, W[:, :, kh, kw], axes=(1, 0)).transpose(0, 3, 1, 2)
+            contrib = xp.tensordot(gy, W[:, :, kh, kw], axes=(1, 0)).transpose(0, 3, 1, 2)
             gx_pad[:, :, h_start:h_end:SH, w_start:w_end:SW] += contrib
 
     return gx_pad[:, :, PH:PH + out_h, PW:PW + out_w]
@@ -2249,9 +2250,9 @@ class FusedConvBNReLU(Function):
         conv_out = xp.rollaxis(conv_out, 3, 1)
 
         # 保存卷积输出和输入，用于反向
-        self.x = x
-        self.W = W
-        self.b = b
+        self.x = x_data
+        self.W = W_data
+        self.b = b_data if b is not None else None
         self.conv_out = conv_out
 
         # ---------- 2. 批量归一化 ----------
@@ -2265,9 +2266,9 @@ class FusedConvBNReLU(Function):
             v = var.reshape(OC)
             
             if self.running_mean is None:
-                self.running_mean = Tensor(xp.zeros(OC, dtype=np.float32), requires_grad=False, name='running_mean')
+                self.running_mean = Tensor(xp.zeros(OC, dtype='float32'), requires_grad=False, name='running_mean')
             if self.running_var is None:
-                self.running_var = Tensor(xp.ones(OC, dtype=np.float32), requires_grad=False, name='running_mean')
+                self.running_var = Tensor(xp.ones(OC, dtype='float32'), requires_grad=False, name='running_mean')
 
             self.running_mean.data = self.momentum * self.running_mean.data + (1 - self.momentum) * m
             self.running_var.data  = self.momentum * self.running_var.data  + (1 - self.momentum) * v
@@ -2276,9 +2277,9 @@ class FusedConvBNReLU(Function):
         else:
             # 测试模式：使用 running 统计量
             if self.running_mean is None:
-                self.running_mean = Tensor(xp.zeros(OC, dtype=np.float32), requires_grad=False, name='running_mean')
+                self.running_mean = Tensor(xp.zeros(OC, dtype='float32'), requires_grad=False, name='running_mean')
             if self.running_var is None:
-                self.running_var = Tensor(xp.ones(OC, dtype=np.float32), requires_grad=False, name='running_mean')
+                self.running_var = Tensor(xp.ones(OC, dtype='float32'), requires_grad=False, name='running_mean')
 
             mean = self.running_mean.data.reshape(1, OC, 1, 1)
             var = self.running_var.data.reshape(1, OC, 1, 1)
@@ -2337,7 +2338,7 @@ class FusedConvBNReLU(Function):
         # ---------- 3. 卷积梯度 ----------
         # 使用卷积的反向传播公式
         # gW: (OC, C, KH, KW)
-        col_x = im2col_array(self.x.data, (KH, KW), self.stride, self.pad, to_matrix=False, dilation=self.dilation)
+        col_x = im2col_array(self.x, (KH, KW), self.stride, self.pad, to_matrix=False, dilation=self.dilation)
         gW = xp.tensordot(g_conv_out, col_x, ((0,2,3), (0,4,5)))   # (OC, C, KH, KW)
 
         # gb (如果有偏置)
@@ -2369,8 +2370,8 @@ def fused_conv_bn_relu(x, W, b, gamma, beta, running_mean, running_var, stride=1
 class CastRigistry:
     '''
     注册自动精度
-    resist_cast: 从Config.current_dtype提高到np.float32
-    cancast: 降低精度至Config.current_dtype (一般是np.float16)
+    resist_cast: 从Config.current_dtype提高到float32
+    cancast: 降低精度至Config.current_dtype (一般是float16)
     '''
     cancast = [
         Tanh,
@@ -2399,31 +2400,39 @@ class CastRigistry:
     ]
 
 class Cast(Function):
+    def __init__(self, dtype='float16'):
+        super().__init__()
+        self.dtype = dtype
+
     def forward(self, *xs):
+        if len(xs) > 1:
+            raise ValueError("Cast function only supports single input.")
+        x = xs[0]
         # 降低精度
-        current_dtype = Config.current_dtype
-        xs = [x.astype(current_dtype) if x.dtype != current_dtype 
-                  else x 
-                  for x in xs]
-        return tuple(xs)
+        x = x.astype(self.dtype) if x.dtype != self.dtype else x
+        return x
 
     def backward(self, gys):
         return gys
 
 def cast(x):
-    return Cast()(*x)
+    return Cast()(x)
 
 class DeCast(Function):
+    def __init__(self, dtype='float16'):
+        super().__init__()
+        self.dtype = dtype
+
     def forward(self, *xs):
+        if len(xs) > 1:
+            raise ValueError("DeCast function only supports single input.")
+        x = xs[0]
         # 提高精度
-        current_dtype = Config.current_dtype
-        xs = [x.astype(np.float32) if x.dtype == current_dtype 
-                  else x 
-                  for x in xs]
-        return tuple(xs)
+        x = x.astype('float32') if x.dtype == self.dtype else x 
+        return x
 
     def backward(self, gys):
         return gys
 
 def decast(x):
-    return DeCast()(*x)
+    return DeCast()(x)

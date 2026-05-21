@@ -18,7 +18,7 @@ class GraphExecutor:
                 continue
             # 没有入边的 Tensor 节点
             if not self.graph.input_edges[node.id]:
-                if isinstance(node.obj, Parameter):
+                if isinstance(node.true_obj, Parameter):
                     self.param_nodes.append(node)
                 else:
                     self.data_input_nodes.append(node)
@@ -38,7 +38,7 @@ class GraphExecutor:
         
         # 1. 将参数节点填入缓存（直接使用 Parameter 对象，其 data 属性会自动更新）
         for node in self.param_nodes:
-            cache[node.id] = node.obj   # node.obj 就是 Parameter 实例
+            cache[node.id] = node.true_obj   # node.true_obj 就是 Parameter 实例
         
         # 2. 将数据输入节点填入缓存
         for node, tensor in zip(self.data_input_nodes, inputs):
@@ -49,7 +49,7 @@ class GraphExecutor:
             if node.type == NodeType.TENSOR:
                 continue  # Tensor 节点的值已由上游 Function 产生
             
-            func: Function = node.obj
+            func: Function = node.true_obj
             # 获取输入 Tensor 节点（前驱）
             input_nodes = [
                 self.graph.nodes[pred_id] for pred_id in self.graph.input_edges[node.id]

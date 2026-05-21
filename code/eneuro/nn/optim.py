@@ -1,5 +1,6 @@
 from ..base import Tensor,Parameter
 from ..utils import StateDict
+from ..base.functions import to_xp, get_array_module
 import numpy as np
 from typing import Any
 try:
@@ -8,14 +9,12 @@ try:
 except ImportError:
     has_cupy = False
 
-def get_array_module(x):
-    """获取数组所在的模块（numpy或cupy）"""
+def is_array(x):
     if isinstance(x, np.ndarray):
-        return np
-    elif has_cupy and isinstance(x, cp.ndarray):
-        return cp
-    else:
-        return np
+        return True
+    if has_cupy and isinstance(x, cp.ndarray):
+        return True
+    return False
 
 LR_KEY = 'lr'
 M_KEY = 'm'
@@ -61,12 +60,20 @@ class Optimizer(StateDict):
                     state[k] = {}
                 for idx, arr in v.items():
                     # 'key': {'idx': ndarray} -> 'key': {'idx': list}
-                    if isinstance(arr, np.ndarray):
+                    if is_array(arr):
                         state[k][idx] = arr.tolist()
+
+                    # 'key': {'idx': other} -> 'key': {'idx': other}
                     else:
                         state[k][idx] = arr
             else:
-                state[k] = v
+                # 'key': ndarray -> 'key': list
+                if is_array(v):
+                    state[k] = v.tolist()
+                
+                # 'key': other -> 'key': other
+                else:
+                    state[k] = v
         return state
 
     def from_dict(self, d: dict) -> None:
@@ -89,6 +96,8 @@ class Optimizer(StateDict):
         self._state = new_state
 
     def _apply_regularization(self, param: Parameter, grad_data) -> np.ndarray:
+        xp = get_array_module(param.data)
+        grad_data = xp.asarray(grad_data)
         if param.name != 'W':
             return grad_data  # 只对权重进行正则化
         """应用正则化到梯度"""
@@ -98,7 +107,6 @@ class Optimizer(StateDict):
         # L2正则化 (权重衰减)
         # Loss = Loss + l2_lambda * ||w||^2
         # dLoss/dw = dLoss/dw + 2 * l2_lambda * w
-        xp = get_array_module(grad_data)
         
         if l2_lambda > 0:
             grad_data += 2 * l2_lambda * param.data
@@ -130,7 +138,7 @@ class SGD(Optimizer):
             param.grad.data = grad
 
             xp = get_array_module(param.data)
-            param.data -= xp.array(self._state[LR_KEY]) * param.grad.data
+            param.data -= xp.asarray(self._state[LR_KEY]) * xp.asarray(param.grad.data)
             
             '''
             print(type(param.grad.data))

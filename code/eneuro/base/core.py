@@ -23,6 +23,17 @@ def get_array_module(arr):
     else:
         return np
 
+def is_array(x):
+    """判断输入是否为numpy或cupy数组"""
+    if isinstance(x, np.ndarray):
+        return True
+    if has_cupy and isinstance(x, cp.ndarray):
+        return True
+    return False
+
+def is_tensor(x):
+    """判断输入是否为Tensor对象"""
+    return isinstance(x, Tensor)
 
 class Config:
     enable_backprop = True
@@ -30,9 +41,6 @@ class Config:
 
     record_graph = False
     current_tracer = None   # 当前活动的 Tracer
-
-    autocast = False
-    current_dtype = np.float32
 
     @classmethod
     @contextlib.contextmanager
@@ -190,7 +198,7 @@ class Tensor(StateDict):
         if self.device == 'cpu':
             return Tensor(np.sum(self.data, axis=axis, keepdims=keepdims))
         if has_cupy:
-            return Tensor(cp.sum(self.data, axis=axis, keepdims=keepdims))
+            return Tensor(cp.sum(self.data, axis=axis, keepdims=keepdims), device='cuda')
     
     def mean(self, axis=None, keepdims=False):
         from .functions import Mean
@@ -201,7 +209,7 @@ class Tensor(StateDict):
             if self.device == 'cpu':
                 self.grad = Tensor(np.ones_like(self.data))
             elif has_cupy:
-                self.grad = Tensor(cp.ones_like(self.data))
+                self.grad = Tensor(cp.ones_like(self.data), device='cuda')
 
         funcs = []
         seen_set = set()
@@ -295,8 +303,8 @@ class Tensor(StateDict):
         else:
             raise ValueError("Stack operation is not supported on the device type.")
         if not tensors:
-            return Tensor(xp.array([]))
-        return Tensor(xp.stack([t.data for t in tensors]))
+            return as_Tensor(xp.array([]))
+        return as_Tensor(xp.stack([t.data for t in tensors]))
 
     def using_config(self, param, create_graph):
         pass
@@ -329,7 +337,17 @@ def as_Tensor(x):
     """将输入转换为Tensor对象"""
     if isinstance(x, Tensor):
         return x
-    return Tensor(as_array(x))
+    if isinstance(x, np.ndarray):
+        return Tensor(x, device='cpu')
+    if has_cupy and isinstance(x, cp.ndarray):
+        return Tensor(x, device='cuda')
+    
+    if isinstance(x, (int, float)):
+        #raise ValueError("由于无法确定设备，int和float不能转换为Tensor。 Value: {}".format(x))
+        pass
+
+    #raise ValueError("Unsupported type for as_Tensor: {}".format(type(x)))
+    return Tensor(as_array(x), device='cpu' if isinstance(x, np.ndarray) else 'cuda' if has_cupy and isinstance(x, cp.ndarray) else 'cpu')
 
 
 class Function:
@@ -339,15 +357,10 @@ class Function:
     def __call__(self, *inputs):
         inputs = [as_Tensor(x) for x in inputs]#判断or转化类型
         xs = [x.data for x in inputs]
-
-        # 自动混合精度转换
-        if Config.autocast:
-            xs = self.auto_cast(xs)
-        #assert isinstance(xs[0], np.ndarray)
         ys = self.forward(*xs)
         if not isinstance(ys, tuple):
             ys = (ys,)
-        outputs = [Tensor(as_array(y)) for y in ys]
+        outputs = [as_Tensor(y) for y in ys]
 
         '''
             这里需要使用python原装的max
@@ -364,7 +377,9 @@ class Function:
 
         # 记录计算图
         if Config.record_graph and Config.current_tracer is not None:
-            Config.current_tracer.record(self, inputs, outputs)
+            inputs_wr = [weakref.ref(i) for i in inputs]
+            outputs_wr = self.outputs
+            Config.current_tracer.record(self, inputs_wr, outputs_wr)
 
         return outputs if len(outputs) > 1 else outputs[0]
 
@@ -399,38 +414,6 @@ class Function:
 
         cv2.waitKey(0)
         cv2.destroyAllWindows()
-
-    def auto_cast(self, xs):
-        func_cls = self.__class__
-        # 跳过 Cast/DeCast 自身，避免无限递归
-        if func_cls not in (f.Cast, f.DeCast):
-            #print(func_cls)
-            # 可以低精度
-            if func_cls in f.CastRigistry.cancast:
-                # 若输入不是低精度，则转换
-                need_cast = False
-                for x in xs:
-                    if x.dtype != Config.current_dtype:
-                        need_cast = True
-                        break
-                    
-                if need_cast:
-                    xs = [as_array(x) for x in f.cast(xs)]
-
-                
-            # 需要高精度
-            elif func_cls in f.CastRigistry.resist_cast:
-                # 若输入是低精度，则转换
-                need_decast = False
-                for x in xs:
-                    if x.dtype == Config.current_dtype:
-                        need_decast = True
-                        break
-
-                if need_decast:
-                    xs = [as_array(x) for x in f.cast(xs)]
-            # 其他算子默认不转换（可依据需求扩展）
-        return xs
 
 '''
 base operators
@@ -472,7 +455,10 @@ class Add(Function):
             gx1 = f.sum_to(gx1, self.x1_shape)
         return gx0, gx1
 def add(x0, x1):
-    x1 = as_Tensor(x1)
+    if not is_tensor(x1) and not is_array(x1):
+        x1 = Tensor(x1, device=x0.device)
+    else:
+        x1 = as_Tensor(x1)
     return Add()(x0, x1)
 # Variable.__add__ = add
 # Variable.__radd__ = add
@@ -492,7 +478,10 @@ class Mul(Function):
             gx1 = f.sum_to(gx1, self.x1_shape)
         return gx0 * x1, gx1 * x0
 def mul(x0, x1):
-    x1 = as_Tensor(x1)
+    if not is_tensor(x1) and not is_array(x1):
+        x1 = Tensor(x1, device=x0.device)
+    else:
+        x1 = as_Tensor(x1)
     return Mul()(x0, x1)
 # Variable.__mul__ = mul
 # Variable.__rmul__ = mul
@@ -522,12 +511,18 @@ class Sub(Function):
         return gx0, -gx1
 
 def sub(x0, x1):
-    x1 = as_Tensor(x1)
+    if not is_tensor(x1) and not is_array(x1):
+        x1 = Tensor(x1, device=x0.device)
+    else:
+        x1 = as_Tensor(x1)
     return Sub()(x0, x1)
 # Variable.__sub__ = sub
 def rsub(x0, x1):
     x0 = as_Tensor(x0)
-    x1 = as_Tensor(x1)
+    if not is_tensor(x1) and not is_array(x1):
+        x1 = Tensor(x1, device=x0.device)
+    else:
+        x1 = as_Tensor(x1)
     return Sub()(x1, x0) # rsub is the same as sub but with the arguments reversed
 # Variable.__rsub__ = rsub
 
@@ -547,12 +542,18 @@ class Div(Function):
         return gx0 / x1, -gx1 * x0 / x1 ** 2
 
 def div(x0, x1):
-    x1 = as_Tensor(x1)
+    if not is_tensor(x1) and not is_array(x1):
+        x1 = Tensor(x1, device=x0.device)
+    else:
+        x1 = as_Tensor(x1)
     return Div()(x0, x1)
 # Variable.__truediv__ = div
 def rdiv(x0, x1):
     x0 = as_Tensor(x0)
-    x1 = as_Tensor(x1)
+    if not is_tensor(x1) and not is_array(x1):
+        x1 = Tensor(x1, device=x0.device)
+    else:
+        x1 = as_Tensor(x1)
     return Div()(x1, x0) # rdiv is the same as div but with the arguments reversed
 # Variable.__rtruediv__ = rdiv
 
@@ -571,6 +572,12 @@ class Pow(Function):
         gx = c * x ** (c - 1) * gy
         return gx
 def pow(x, c):
+    # 转换Tensor是为了将c的设备属性与x保持一致，避免在计算过程中出现设备不匹配的问题
+    if not is_tensor(c) and not is_array(c):
+        c = Tensor(c, device=x.device)
+    else:
+        c = as_Tensor(c)
+    c = c.data
     return Pow(c)(x)
 # Variable.__pow__ = pow
 

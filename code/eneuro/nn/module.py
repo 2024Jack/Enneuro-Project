@@ -41,17 +41,24 @@ class Layer:
     def to(self, device='cpu'):
         if device == self.device:
             return self
-        for param in self.params():
-            if param.data is None:
-                param.device = device
-            elif device in ['cuda', 'gpu']:
-                if isinstance(param.data, np.ndarray):
-                    param._data = cp.asarray(param.data)
-                param.device = 'cuda'
-            else:  # cpu
-                if has_cupy and isinstance(param.data, cp.ndarray):
-                    param._data = cp.asnumpy(param.data)
-                param.device = 'cpu'
+        
+        for name in self._params:
+            obj = self.__dict__[name]
+            if isinstance(obj, Layer):
+                obj.to(device)
+            else:
+                param = obj
+                if param.data is None:
+                    param.device = device
+                elif device in ['cuda', 'gpu']:
+                    if isinstance(param.data, np.ndarray):
+                        param._data = cp.asarray(param.data)
+                    param.device = 'cuda'
+                else:  # cpu
+                    if has_cupy and isinstance(param.data, cp.ndarray):
+                        param._data = cp.asnumpy(param.data)
+                    param.device = 'cpu'
+
         self.device = device
         return self
 
@@ -99,7 +106,7 @@ class Layer:
 #layer类中已设置参数管理功能，后续layer只需要定义参数即可自动支持参数管理
 
 class Linear(Layer):
-    def __init__(self, out_size, nobias=False, dtype=np.float32, in_size=None):
+    def __init__(self, out_size, nobias=False, dtype='float32', in_size=None):
         super().__init__()
         self.in_size = in_size
         self.out_size = out_size
@@ -107,7 +114,10 @@ class Linear(Layer):
 
         self.W = Parameter(None, name='W')
         if self.in_size is not None:
-            self._init_W(np)
+            xp = np
+            if has_cupy and self.device in ['cuda', 'gpu']:
+                xp = cp
+            self._init_W(xp)
 
         if nobias:
             self.b = None
@@ -132,17 +142,18 @@ class Linear(Layer):
         self.W.data = W_data
 
     def forward(self, inputs):
+        inputs = inputs.to(self.device)
+            
         if self.W.data is None:
             self.in_size = inputs.shape[1]
-            xp = get_array_module(inputs)
-            self._init_W(xp)
+            self._init_W(get_array_module(inputs.data))
 
         y = linear(inputs, self.W, self.b)
         return y
     
 class Conv2d(Layer):
     def __init__(self, out_channels, kernel_size, stride=1,
-                 pad=0, nobias=False, dtype=np.float32, in_channels=None, visualize=False, 
+                 pad=0, nobias=False, dtype='float32', in_channels=None, visualize=False, 
                  groups=1, depthwise=False, dilation=1):
         super().__init__()
         self.in_channels = in_channels
@@ -170,7 +181,10 @@ class Conv2d(Layer):
 
         self.W = Parameter(None, name='W')
         if in_channels is not None:
-            self._init_W(np)
+            xp = np
+            if has_cupy and self.device in ['cuda', 'gpu']:
+                xp = cp
+            self._init_W(xp)
 
         if nobias:
             self.b = None
@@ -193,10 +207,11 @@ class Conv2d(Layer):
         self.W.data = W_data
 
     def forward(self, inputs):
+        inputs = inputs.to(self.device)
+
         if self.W.data is None:
-            self.in_channels = inputs.shape[1]          
-            xp = get_array_module(inputs)
-            self._init_W(xp)
+            self.in_channels = inputs.shape[1]
+            self._init_W(get_array_module(inputs.data))
 
         if self.depthwise:
             # 深度可分离卷积: 先进行逐通道卷积，再进行1x1卷积
@@ -210,7 +225,9 @@ class Conv2d(Layer):
             )
             # 1x1卷积
             if self.channel_multiplier > 1:
-                xp = get_array_module(inputs)
+                xp = np
+                if has_cupy and self.device in ['cuda', 'gpu']:
+                    xp = cp
                 # 创建1x1卷积核
                 C = self.in_channels
                 OC = self.out_channels
@@ -245,7 +262,7 @@ class Conv2d(Layer):
 # 转置卷积层
 class Deconv2d(Layer):
     def __init__(self, out_channels, kernel_size, stride=1,
-                 pad=0, dilation=1, nobias=False, dtype=np.float32, in_channels=None, visualize=False):
+                 pad=0, dilation=1, nobias=False, dtype='float32', in_channels=None, visualize=False):
   
         super().__init__()
         self.in_channels = in_channels
@@ -259,7 +276,10 @@ class Deconv2d(Layer):
 
         self.W = Parameter(None, name='W')
         if in_channels is not None:
-            self._init_W(np)
+            xp = np
+            if has_cupy and self.device in ['cuda', 'gpu']:
+                xp = cp
+            self._init_W(xp)
 
         if nobias:
             self.b = None
@@ -274,10 +294,11 @@ class Deconv2d(Layer):
         self.W.data = W_data
 
     def forward(self, x):
+        x = x.to(self.device)
+
         if self.W.data is None:
             self.in_channels = x.shape[1]
-            xp = get_array_module(x)
-            self._init_W(xp)
+            self._init_W(get_array_module(x.data))
 
         y = deconv2d(x, self.W, self.b, self.stride, self.pad, dilation=self.dilation, visualize=self.visualize)
         return y
@@ -285,7 +306,7 @@ class Deconv2d(Layer):
 from ..base import Config
 
 class BatchNorm(Layer):
-    def __init__(self, num_features, num_dims=4, eps=1e-5, momentum=0.9, dtype=np.float32):
+    def __init__(self, num_features, num_dims=4, eps=1e-5, momentum=0.9, dtype='float32'):
         super().__init__()
         self.num_features = num_features
         self.num_dims = num_dims
@@ -308,6 +329,8 @@ class BatchNorm(Layer):
         self.moving_var = self.running_var.data
 
     def forward(self, x):
+        x = x.to(self.device)
+
         if self.num_dims == 2:
             n, c = x.shape
             x_4d = x.reshape(n, c, 1, 1)
@@ -322,7 +345,7 @@ class BatchNorm(Layer):
         return y
 
 class BatchNorm2d(Layer):
-    def __init__(self, out_channels, momentum=0.9, eps=1e-5, dtype=np.float32):
+    def __init__(self, out_channels, momentum=0.9, eps=1e-5, dtype='float32'):
         super().__init__()
         self.out_channels = out_channels
         self.momentum = momentum
@@ -338,13 +361,15 @@ class BatchNorm2d(Layer):
         self.running_var.requires_grad=False
 
     def forward(self, inputs):
+        inputs = inputs.to(self.device)
+
         x = (inputs, self.gamma, self.beta)
         y = batch_norm2d(x, self.running_mean, self.running_var, self.momentum, self.eps)
         return y
     
 class FusedConvReLU(Layer):
     def __init__(self, out_channels, kernel_size, stride=1, pad=0, 
-                 nobias=False, dtype=np.float32, in_channels=None, visualize=False, 
+                 nobias=False, dtype='float32', in_channels=None, visualize=False, 
                  groups=1, depthwise=False, dilation=1):
         super().__init__()
         self.conv = Conv2d(out_channels, kernel_size, stride, pad, 
@@ -352,6 +377,7 @@ class FusedConvReLU(Layer):
                  groups, depthwise, dilation)
 
     def forward(self, inputs):
+        inputs = inputs.to(self.device)
         if self.conv.depthwise:
             # 深度可分离卷积: 先进行逐通道卷积，再进行1x1卷积
             print("Warning: Not supported fusion (depthwise conv). Using not fused function.")
@@ -372,7 +398,7 @@ class FusedConvReLU(Layer):
 
 class FusedConvBNReLU(Layer):
     def __init__(self, out_channels, kernel_size, stride=1, pad=0, 
-                 nobias=False, dtype=np.float32, in_channels=None, visualize=False, 
+                 nobias=False, dtype='float32', in_channels=None, visualize=False, 
                  groups=1, depthwise=False, dilation=1,
                  momentum=0.9, eps=1e-5):
         super().__init__()
@@ -383,6 +409,7 @@ class FusedConvBNReLU(Layer):
         self.visualize = visualize
 
     def forward(self, inputs):
+        inputs = inputs.to(self.device)
         if self.conv.depthwise:
             # 深度可分离卷积: 先进行逐通道卷积，再进行1x1卷积
             print("Warning: Not supported fusion (depthwise conv). Using not fused function.")
@@ -513,6 +540,7 @@ class Sequential(Module):
             self.layers.append(layer)
 
     def forward(self, inputs):
+        inputs = inputs.to(self.device)
         for layer in self.layers:
             inputs = layer(inputs)
         return inputs
@@ -530,6 +558,7 @@ class MLP(Module):
             self.layers.append(layer)
 
     def forward(self, inputs):
+        inputs = inputs.to(self.device)
         for l in self.layers[:-1]:
             inputs = self.activation(l(inputs))
         return self.layers[-1](inputs)
@@ -574,6 +603,7 @@ class CNNWithPooling(Module):
             self.layers.append(layer)
 
     def forward(self, inputs):
+        inputs = inputs.to(self.device)
         for layer in self.layers:
             inputs = layer(inputs)
         return inputs
@@ -593,6 +623,7 @@ class ResidualBlock(Module):
         self.downsample = downsample
     
     def forward(self, x):
+        x = x.to(self.device)
         y = self.relu(self.bn1(self.conv1(x)))
         y = self.bn2(self.conv2(y))
         if self.conv3:

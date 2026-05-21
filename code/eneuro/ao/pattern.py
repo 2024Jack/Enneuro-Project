@@ -32,7 +32,7 @@ class NodeMatcher:
         if node.type != NodeType.FUNCTION:
             return False
 
-        obj = node.obj
+        obj = node.true_obj
         # 类型匹配
         if self.func_type is not None:
             if self.strategy == MatchStrategy.EXACT:
@@ -231,7 +231,7 @@ class MatchResult:
             momentum = bn_node.params.get('momentum', 0.9)
             eps = bn_node.params.get('eps', 1e-5)
             
-            bn_func = bn_node.obj  # functions.BatchNorm2d 实例
+            bn_func = bn_node.true_obj  # functions.BatchNorm2d 实例
             running_mean = bn_func.running_mean
             running_var = bn_func.running_var
             

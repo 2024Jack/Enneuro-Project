@@ -5,6 +5,7 @@ from typing import List, Dict, Any, Optional
 
 from ..base.core import Tensor, Function, Config
 from .graph import Graph, Node, NodeType
+import weakref
 
 class Tracer:
     """
@@ -16,7 +17,7 @@ class Tracer:
         # 可选：缓存 Function 的参数提取结果
         self._func_params_cache: Dict[int, Dict] = {}
 
-    def record(self, func: Function, inputs: List[Tensor], outputs: List[Tensor]) -> None:
+    def record(self, func: Function, inputs_wr: List[weakref.ref[Tensor]], outputs_wr: List[weakref.ref[Tensor]]) -> None:
         """
         记录一次 Function 调用，构建节点和边。
         参数：
@@ -25,9 +26,9 @@ class Tracer:
             outputs: 输出 Tensor 列表
         """
         # 1. 获取或创建输入 Tensor 节点
-        input_nodes = [self._get_or_create_tensor_node(t) for t in inputs]
+        input_nodes = [self._get_or_create_tensor_node(t) for t in inputs_wr]
         # 2. 获取或创建输出 Tensor 节点
-        output_nodes = [self._get_or_create_tensor_node(t) for t in outputs]
+        output_nodes = [self._get_or_create_tensor_node(t) for t in outputs_wr]
         # 3. 获取或创建 Function 节点（附带参数）
         func_node = self._get_or_create_func_node(func)
 
@@ -38,9 +39,9 @@ class Tracer:
         for out_node in output_nodes:
             self.graph.add_edge(func_node, out_node)
 
-    def _get_or_create_tensor_node(self, tensor: Tensor) -> Node:
+    def _get_or_create_tensor_node(self, tensor_wr: weakref.ref[Tensor]) -> Node:
         """返回 Tensor 对应的节点（自动去重）"""
-        return self.graph.add_node(tensor)
+        return self.graph.add_node(tensor_wr)
 
     def _get_or_create_func_node(self, func: Function) -> Node:
         """返回 Function 对应的节点，并附加参数信息"""
