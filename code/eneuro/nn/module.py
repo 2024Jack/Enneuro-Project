@@ -474,6 +474,8 @@ class Module(Layer,StateDict):
     def _to_pure_list(self, tensor_like):
         if isinstance(tensor_like, np.ndarray):
             return tensor_like.tolist()
+        elif has_cupy and isinstance(tensor_like, cp.ndarray):
+            return cp.asnumpy(tensor_like).tolist()
         elif isinstance(tensor_like, (list, tuple)):
             return [self._to_pure_list(item) for item in tensor_like]
         elif isinstance(tensor_like, (int, float, bool)):
