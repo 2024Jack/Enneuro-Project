@@ -18,7 +18,7 @@ from model import ResNet18AutoDrive
 
 
 batch_size = 64
-total_epochs = 1
+total_epochs = 60
 lr =1e-4
 
 model = ResNet18AutoDrive()
@@ -70,8 +70,8 @@ trainer.fit(
     device='cuda'
 )
 
-print(f"Saving model to {save_folder}/model.json...")
-serializer.save(model, save_folder + "/model.json")
+print(f"Saving model to {save_folder}/model_gpu.json...")
+serializer.save(model, save_folder + "/model_gpu.json")
 print("Model saved successfully.")
 
 fig, axes = plt.subplots(1, 3, figsize=(15, 5))
