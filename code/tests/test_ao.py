@@ -12,7 +12,7 @@ from eneuro.base import functions as F
 from eneuro.nn.module import CNNWithPooling,Sequential,Conv2d,BatchNorm2d,Linear
 from eneuro.nn.loss import CrossEntropyLoss
 from eneuro.nn.optim import SGD
-from eneuro.ao import GraphOptimizer,GraphExecutor,trace_context, autocast_context, GradScaler
+from eneuro.ao import GraphOptimizer,GraphExecutor,trace_context, GradScaler
 from eneuro.utils import save_checkpoint,load_checkpoint
 
 # 创建简单的测试数据
@@ -20,10 +20,10 @@ size = 32
 X = np.random.randn(2, 3, size, size).astype(np.float32)  # 2张3通道图像
 y = np.array([0, 5], dtype=np.int32)                   # 2个样本的标签，范围[0, 9]
 
-num_fuse = 1
+num_fuse = 100
 sequential_content = []
 for i in range(num_fuse):
-    sequential_content.append(Conv2d(3,3))
+    sequential_content.append(Conv2d(3,3,1,1))
     sequential_content.append(BatchNorm2d(3))
     sequential_content.append(F.relu)
 sequential_content.append(F.flatten)
@@ -55,7 +55,7 @@ def test_normal(epoch_num = 10):
 
     #save_checkpoint(model, optimizer, num_epoch, "normal_checkpoint.json")
     
-    #print(f"normal training complete in {duration:.4f}s  loss = {loss}")
+    print(f"normal training complete in {duration:.4f}s")
     return duration
 
 def test_executor(epoch_num = 10):
@@ -65,11 +65,9 @@ def test_executor(epoch_num = 10):
 
     # 执行一次前向，记录计算图
     sample_input = Tensor(X)
-    with trace_context() as tracer:
-        _ = model(sample_input)
-        graph = tracer.get_graph()
-    graph.visualize('origin_graph.dot')
-    executor = GraphExecutor(graph)
+    graph = GraphOptimizer.model_to_graph(model, sample_input)
+    #graph.visualize('origin_graph.dot')
+    executor = GraphOptimizer.graph_to_executor(graph)
 
     # 创建损失函数和优化器
     loss_fn = CrossEntropyLoss()
@@ -84,9 +82,10 @@ def test_executor(epoch_num = 10):
         loss.backward()
 
         optimizer.step()
+        optimizer.zero_grad()
     toc = time.time()
     duration = toc - tic
-    #print(f"executor training complete in {duration:.4f}s  loss = {loss}")
+    print(f"executor training complete in {duration:.4f}s")
     return duration
 
 def test_ao(epoch_num = 10):
@@ -335,4 +334,8 @@ def test_autocast():
 
 if __name__ == "__main__":
     #test_auto_fuse()
-    test_autocast()
+    #test_autocast()
+
+    for i in range(100):
+        test_executor()
+
