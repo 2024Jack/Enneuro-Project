@@ -370,9 +370,9 @@ def train(num_epoch=10, option='normal', autocast=False):
             sample_num += len(images)
 
             display_acc = (acc_sum / sample_num) if sample_num > 0 and not np.isnan(acc_sum) else np.nan
-            #progress_bar(batch_idx * batch_size + len(images), len(dataloader.dataset), epoch, loss.to('cpu').data, display_acc)
+            progress_bar(batch_idx * batch_size + len(images), len(dataloader.dataset), epoch, loss.to('cpu').data, display_acc)
 
-            break
+            #break
         
         toc = time.time()
         duration = toc - tic
@@ -407,13 +407,13 @@ def test5():
 
 if __name__ == '__main__':
     
-    #'''
+    '''
     for i in range(1000):
         test_resnet18_forward_backward()
     #'''
 
-    '''
-    for i in range(10):
+    #'''
+    for i in range(1):
         test1()
         test2()
         test3()
