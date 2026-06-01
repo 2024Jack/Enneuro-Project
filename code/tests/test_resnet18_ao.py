@@ -107,9 +107,23 @@ def test_resnet18_forward_backward():
     loss_fn = crossEntropyError
 
     tic = time.time()
-    for batch_idx, (images, labels) in [(0,dataset.__getitem__(0))]:
-    #for batch_idx, (images, labels) in enumerate(dataloader):
-        images = as_Tensor(images._data.reshape((1,)+images._data.shape))
+    for batch_idx, (images, labels) in enumerate(dataloader):
+    #for i in range(len(dataset)):
+        '''
+        sample_image, sample_label = dataset[0]
+        sample_image = np.ones_like(sample_image)
+        sample_label = np.ones_like(sample_label)
+
+        batch_data = [sample_image for i in range(batch_size)]
+        batch_target = [sample_label for i in range(batch_size)]
+
+        sample_image = np.stack(batch_data)
+        sample_label = np.stack(batch_target)
+
+        batch_idx, (images, labels) = (i,(sample_image, sample_label))
+        images = as_Tensor(images)
+        #'''
+
         y_pre = model(images)
         
         loss = y_pre * y_pre
@@ -122,6 +136,8 @@ def test_resnet18_forward_backward():
     toc = time.time()
     duration = toc - tic
     print(f"[PASS] test_resnet18_forward_backward {duration:.4f}")
+    #import gc
+    #gc.collect()
     print_gpu_mem()
 
 # -*- coding: utf-8 -*-
@@ -225,6 +241,7 @@ class SteeringDataset(Dataset):
             # 实际上 __init__ 已保证 target_transform 不为 None，此分支仅防御
             label = self._default_target_transform(angle)
 
+        #'''
         # 4. 转换为框架要求的 Tensor 类型
         img_tensor = as_Tensor(img)
         # 确保 label 是标量 Tensor
@@ -240,6 +257,9 @@ class SteeringDataset(Dataset):
             label_tensor = label_tensor.reshape(())
         else:
             raise ValueError(f"标签应为标量，但得到形状 {label_tensor.shape}")
+        #'''
+        #img_tensor = img
+        #label_tensor = label
 
         return img_tensor, label_tensor
 
