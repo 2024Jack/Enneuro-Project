@@ -240,9 +240,9 @@ class Tensor(StateDict):
                     #     gx = Tensor(gx)
                     assert isinstance(gx,Tensor), "请检查反向传播中的数据是否是Tensor类型！"
                     if x.grad is None:
-                        x.grad = gx
+                        x.grad = as_Tensor(gx.data) # 只复制data，不引用原Tensor，防止循环引用导致的内存泄漏
                     else:
-                        x.grad = x.grad + gx
+                        x.grad.data = x.grad.data + gx.data # 只复制data，不引用原Tensor，防止循环引用导致的内存泄漏
 
                     if x.creator is not None:
                         add_func(x.creator)
