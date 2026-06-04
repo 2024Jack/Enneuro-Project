@@ -312,18 +312,21 @@ def suggest_target_layer(model: Module) -> Layer:
 
 ### 5.1 修改`eneuro/nn/module.py`
 
-- 在`Layer`类中添加`register_forward_hook`和`register_backward_hook`方法
-- 确保Conv2d层正确暴露输入输出
+* 在`Layer`类中添加`register_forward_hook`和`register_backward_hook`方法
+
+* 确保Conv2d层正确暴露输入输出
 
 ### 5.2 修改`eneuro/base/functions.py`
 
-- 添加`GuidedReLU`类用于Guided Backpropagation
-- 添加上采样函数用于热力图插值
+* 添加`GuidedReLU`类用于Guided Backpropagation
+
+* 添加上采样函数用于热力图插值
 
 ### 5.3 创建新模块
 
-- 创建`eneuro/explainability/`目录
-- 实现所有新功能
+* 创建`eneuro/explainability/`目录
+
+* 实现所有新功能
 
 ## 6. 测试计划
 
@@ -362,34 +365,45 @@ def test_donkeycar_gradcam():
 
 ### Phase 1: 钩子系统实现（1天）
 
-- 实现HookHandle类
-- 实现前向/反向钩子机制
-- 在Module类中集成钩子方法
+* 实现HookHandle类
+
+* 实现前向/反向钩子机制
+
+* 在Module类中集成钩子方法
 
 ### Phase 2: Grad-CAM实现（2天）
 
-- 实现FeatureExtractor
-- 实现GradCAM类
-- 实现热力图生成和上采样
+* 实现FeatureExtractor
+
+* 实现GradCAM类
+
+* 实现热力图生成和上采样
 
 ### Phase 3: Guided Backpropagation实现（1天）
 
-- 实现GuidedReLU Function类
-- 实现GuidedBackpropagation类
-- 梯度捕获和提取
+* 实现GuidedReLU Function类
+
+* 实现GuidedBackpropagation类
+
+* 梯度捕获和提取
 
 ### Phase 4: 可视化融合（1天）
 
-- 实现热力图上色
-- 实现图像叠加
-- 实现融合算法
+* 实现热力图上色
+
+* 实现图像叠加
+
+* 实现融合算法
 
 ### Phase 5: 测试与优化（2天）
 
-- 单元测试编写
-- 集成测试
-- 性能优化
-- 文档编写
+* 单元测试编写
+
+* 集成测试
+
+* 性能优化
+
+* 文档编写
 
 ## 8. 潜在挑战与解决方案
 
@@ -399,8 +413,9 @@ def test_donkeycar_gradcam():
 
 **解决方案**：
 
-- 使用`register_full_backward_hook`在反向传播时拦截梯度
-- 或者手动执行部分反向传播，只传播到目标层
+* 使用`register_full_backward_hook`在反向传播时拦截梯度
+
+* 或者手动执行部分反向传播，只传播到目标层
 
 ### 8.2 挑战2：Guided Backpropagation与现有Function系统兼容
 
@@ -408,8 +423,9 @@ def test_donkeycar_gradcam():
 
 **解决方案**：
 
-- 提供两种模式：原始模式和Guided模式
-- 在GuidedBackpropagation执行期间临时替换ReLU的backward行为
+* 提供两种模式：原始模式和Guided模式
+
+* 在GuidedBackpropagation执行期间临时替换ReLU的backward行为
 
 ### 8.3 挑战3：GPU/CPU兼容性
 
@@ -417,20 +433,23 @@ def test_donkeycar_gradcam():
 
 **解决方案**：
 
-- 所有捕获的张量自动转换为numpy数组
-- 提供设备自动检测和转换
+* 所有捕获的张量自动转换为numpy数组
+
+* 提供设备自动检测和转换
 
 ## 9. 性能考虑
 
 ### 9.1 内存优化
 
-- 使用`detach()`避免不必要的梯度追踪
-- 及时清理不再需要的中间结果
+* 使用`detach()`避免不必要的梯度追踪
+
+* 及时清理不再需要的中间结果
 
 ### 9.2 计算效率
 
-- 批量处理时使用向量化操作
-- 避免不必要的上采样/下采样
+* 批量处理时使用向量化操作
+
+* 避免不必要的上采样/下采样
 
 ## 10. 预期成果
 

@@ -18,7 +18,7 @@ def get_array_module(arr):
     """根据输入数组类型返回对应的数组模块(numpy或cupy)"""
     if isinstance(arr, Tensor):
         return get_array_module(arr.data)
-    if isinstance(arr, cp.ndarray):
+    if has_cupy and isinstance(arr, cp.ndarray):
         return cp
     else:
         return np

@@ -11,7 +11,7 @@ import numpy as np
 from eneuro.base import Tensor
 from eneuro.nn.module import Conv2d, Linear, Sequential, Module
 from eneuro.base import functions as F
-from explainability import GradCAM, create_gradcam
+from eneuro.explainability import GradCAM, create_gradcam
 
 
 class SimpleCNN(Module):

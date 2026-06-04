@@ -3,7 +3,7 @@ Grad-CAM 完整功能测试
 
 功能：
 1. 创建简单的 CNN 模型
-2. 使用合成数据快速训练
+2. 使用 MNIST 数据集训练
 3. 使用 Grad-CAM 生成热力图
 4. 可视化结果并保存
 
@@ -15,6 +15,7 @@ Grad-CAM 完整功能测试
 
 import sys
 import os
+import pickle
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
@@ -25,13 +26,13 @@ from eneuro.nn.module import Conv2d, Linear, Module, BatchNorm
 from eneuro.base import functions as F
 from eneuro.nn.optim import Adam
 from eneuro.nn.loss import meanSquaredError, CrossEntropyLoss
-from explainability import GradCAM, create_gradcam
+from eneuro.explainability import GradCAM, create_gradcam
 
 
 class SimpleCNN(Module):
-    """简单的 CNN 模型，用于快速测试"""
+    """Simple CNN model for MNIST"""
 
-    def __init__(self, in_channels=3, num_classes=10):
+    def __init__(self, in_channels=1, num_classes=10):
         super().__init__()
 
         self.conv1 = Conv2d(out_channels=16, kernel_size=3, stride=1, pad=1, in_channels=in_channels)
@@ -72,38 +73,34 @@ class SimpleCNN(Module):
         return x
 
 
-def generate_synthetic_data(num_samples=100, img_size=32, num_classes=10):
-    """生成合成数据集（带类别特征）"""
-    print(f"生成合成数据集: {num_samples} 样本, 图像大小 {img_size}x{img_size}")
-
-    data = []
-    labels = []
-
-    for i in range(num_samples):
-        class_idx = i % num_classes
-
-        img = np.random.randn(3, img_size, img_size).astype(np.float32) * 0.3
-
-        cx = img_size // 4 + (class_idx % 3) * (img_size // 4)
-        cy = img_size // 4 + (class_idx // 4) * (img_size // 4)
-        radius = img_size // 6
-
-        for c in range(3):
-            for y in range(img_size):
-                for x in range(img_size):
-                    if (x - cx) ** 2 + (y - cy) ** 2 < radius ** 2:
-                        img[c, y, x] += 2.0
-
-        data.append(img)
-        labels.append(class_idx)
-
-    return np.array(data), np.array(labels)
+def load_mnist_data(data_path=None, num_train=5000, num_test=500):
+    """Load MNIST dataset"""
+    if data_path is None:
+        data_path = os.path.join(os.path.dirname(__file__), 'testdata', 'MNIST_data', 'mnist.pkl')
+    
+    print(f"Loading MNIST dataset: {data_path}")
+    
+    with open(data_path, 'rb') as f:
+        data = pickle.load(f)
+    
+    train_img = data['train_img'][:num_train]
+    train_label = data['train_label'][:num_train]
+    test_img = data['test_img'][:num_test]
+    test_label = data['test_label'][:num_test]
+    
+    train_img = train_img.reshape(-1, 1, 28, 28).astype(np.float32) / 255.0
+    test_img = test_img.reshape(-1, 1, 28, 28).astype(np.float32) / 255.0
+    
+    print(f"   ✓ Train set: {train_img.shape}, Labels: {train_label.shape}")
+    print(f"   ✓ Test set: {test_img.shape}, Labels: {test_label.shape}")
+    
+    return train_img, train_label, test_img, test_label
 
 
 def quick_train(model, train_data, train_labels, epochs=10, batch_size=20, lr=0.001):
-    """快速训练模型"""
+    """Quick training function"""
     print("\n" + "=" * 70)
-    print("开始快速训练")
+    print("Starting training")
     print("=" * 70)
 
     params_list = list(model.params())
@@ -145,14 +142,14 @@ def quick_train(model, train_data, train_labels, epochs=10, batch_size=20, lr=0.
         print(f"Epoch {epoch + 1}/{epochs} | Loss: {avg_loss:.4f} | Accuracy: {accuracy:.4f}")
 
     print("=" * 70)
-    print("训练完成！")
+    print("Training completed!")
     print("=" * 70)
 
 
 def visualize_gradcam(model, test_data, test_labels, target_layer, save_path="gradcam_results.png"):
-    """可视化 Grad-CAM 结果"""
+    """Visualize Grad-CAM results"""
     print("\n" + "=" * 70)
-    print("生成 Grad-CAM 热力图")
+    print("Generating Grad-CAM heatmaps")
     print("=" * 70)
 
     gradcam = GradCAM(model, target_layer)
@@ -174,15 +171,15 @@ def visualize_gradcam(model, test_data, test_labels, target_layer, save_path="gr
 
         heatmap = gradcam.generate(input_tensor, class_idx=pred_label)
 
-        original_img = input_data[0].transpose(1, 2, 0)
+        original_img = input_data[0].squeeze()
         original_img = (original_img - original_img.min()) / (original_img.max() - original_img.min() + 1e-8)
 
-        axes[i, 0].imshow(original_img)
-        axes[i, 0].set_title(f'原始图像\n真实标签: {true_label}, 预测: {pred_label}', fontsize=12)
+        axes[i, 0].imshow(original_img, cmap='gray')
+        axes[i, 0].set_title(f'Original Image\nTrue: {true_label}, Pred: {pred_label}', fontsize=12)
         axes[i, 0].axis('off')
 
         im1 = axes[i, 1].imshow(heatmap, cmap='jet', interpolation='bilinear', vmin=0, vmax=1)
-        axes[i, 1].set_title(f'Grad-CAM 热力图\n(目标层: {type(target_layer).__name__})', fontsize=12)
+        axes[i, 1].set_title(f'Grad-CAM Heatmap\n(Layer: {type(target_layer).__name__})', fontsize=12)
         axes[i, 1].axis('off')
         plt.colorbar(im1, ax=axes[i, 1], fraction=0.046, pad=0.04)
 
@@ -191,34 +188,34 @@ def visualize_gradcam(model, test_data, test_labels, target_layer, save_path="gr
 
         heatmap_colored = np.array(plt.cm.jet(heatmap_resized))[:, :, :3]
 
-        overlay = 0.5 * original_img + 0.5 * heatmap_colored
+        overlay = 0.5 * original_img[:, :, np.newaxis] + 0.5 * heatmap_colored
         overlay = np.clip(overlay, 0, 1)
 
         axes[i, 2].imshow(overlay)
-        axes[i, 2].set_title('叠加可视化', fontsize=12)
+        axes[i, 2].set_title('Overlay', fontsize=12)
         axes[i, 2].axis('off')
 
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    print(f"\n✓ 可视化结果已保存到: {save_path}")
+    print(f"\n✓ Visualization saved to: {save_path}")
 
     plt.close()
 
     print("=" * 70)
-    print("Grad-CAM 可视化完成！")
+    print("Grad-CAM visualization completed!")
     print("=" * 70)
 
 
 def test_gradcam_on_different_layers(model, test_data, test_labels):
-    """测试不同层的 Grad-CAM"""
+    """Test Grad-CAM on different layers"""
     print("\n" + "=" * 70)
-    print("测试不同层的 Grad-CAM")
+    print("Testing Grad-CAM on different layers")
     print("=" * 70)
 
     layers_to_test = [
-        ('conv1 (浅层)', model.conv1),
-        ('conv2 (中层)', model.conv2),
-        ('conv3 (深层)', model.conv3),
+        ('conv1 (shallow)', model.conv1),
+        ('conv2 (middle)', model.conv2),
+        ('conv3 (deep)', model.conv3),
     ]
 
     input_data = test_data[0:1]
@@ -227,7 +224,7 @@ def test_gradcam_on_different_layers(model, test_data, test_labels):
     output = model(input_tensor)
     pred_label = int(np.argmax(output.data, axis=1)[0])
 
-    print(f"\n预测类别: {pred_label}")
+    print(f"\nPredicted class: {pred_label}")
 
     fig, axes = plt.subplots(1, len(layers_to_test), figsize=(6 * len(layers_to_test), 5))
 
@@ -236,27 +233,27 @@ def test_gradcam_on_different_layers(model, test_data, test_labels):
         heatmap = gradcam.generate(input_tensor, class_idx=pred_label)
 
         print(f"\n{layer_name}:")
-        print(f"  热力图形状: {heatmap.shape}")
-        print(f"  热力图范围: [{heatmap.min():.4f}, {heatmap.max():.4f}]")
-        print(f"  热力图平均值: {heatmap.mean():.4f}")
-        print(f"  热力图标准差: {heatmap.std():.4f}")
+        print(f"  Heatmap shape: {heatmap.shape}")
+        print(f"  Heatmap range: [{heatmap.min():.4f}, {heatmap.max():.4f}]")
+        print(f"  Heatmap mean: {heatmap.mean():.4f}")
+        print(f"  Heatmap std: {heatmap.std():.4f}")
 
         im = axes[idx].imshow(heatmap, cmap='jet', interpolation='bilinear', vmin=0, vmax=1)
-        axes[idx].set_title(f'{layer_name}\n形状: {heatmap.shape}', fontsize=14)
+        axes[idx].set_title(f'{layer_name}\nShape: {heatmap.shape}', fontsize=14)
         axes[idx].axis('off')
         plt.colorbar(im, ax=axes[idx], fraction=0.046, pad=0.04)
 
-    plt.suptitle(f'不同层的 Grad-CAM 对比 (预测类别: {pred_label})', fontsize=16)
+    plt.suptitle(f'Grad-CAM on Different Layers (Predicted: {pred_label})', fontsize=16)
     plt.tight_layout()
     plt.savefig('gradcam_different_layers.png', dpi=150, bbox_inches='tight')
-    print(f"\n✓ 不同层对比已保存到: gradcam_different_layers.png")
+    print(f"\n✓ Different layers comparison saved to: gradcam_different_layers.png")
     plt.close()
 
 
 def test_gradcam_different_classes(model, test_data, test_labels):
-    """测试同一图像对不同类别的 Grad-CAM"""
+    """Test Grad-CAM for different classes"""
     print("\n" + "=" * 70)
-    print("测试不同类别的 Grad-CAM")
+    print("Testing Grad-CAM for different classes")
     print("=" * 70)
 
     input_data = test_data[0:1]
@@ -274,26 +271,26 @@ def test_gradcam_different_classes(model, test_data, test_labels):
     for idx, class_idx in enumerate(classes_to_test):
         heatmap = gradcam.generate(input_tensor, class_idx=class_idx)
 
-        print(f"\n类别 {class_idx}:")
-        print(f"  热力图范围: [{heatmap.min():.4f}, {heatmap.max():.4f}]")
-        print(f"  热力图平均值: {heatmap.mean():.4f}")
+        print(f"\nClass {class_idx}:")
+        print(f"  Heatmap range: [{heatmap.min():.4f}, {heatmap.max():.4f}]")
+        print(f"  Heatmap mean: {heatmap.mean():.4f}")
 
         im = axes[idx].imshow(heatmap, cmap='jet', interpolation='bilinear', vmin=0, vmax=1)
-        axes[idx].set_title(f'类别 {class_idx}' + (' (预测)' if class_idx == pred_label else ''), fontsize=14)
+        axes[idx].set_title(f'Class {class_idx}' + (' (predicted)' if class_idx == pred_label else ''), fontsize=14)
         axes[idx].axis('off')
         plt.colorbar(im, ax=axes[idx], fraction=0.046, pad=0.04)
 
-    plt.suptitle(f'同一图像对不同类别的 Grad-CAM', fontsize=16)
+    plt.suptitle(f'Grad-CAM for Different Classes', fontsize=16)
     plt.tight_layout()
     plt.savefig('gradcam_different_classes.png', dpi=150, bbox_inches='tight')
-    print(f"\n✓ 不同类别对比已保存到: gradcam_different_classes.png")
+    print(f"\n✓ Different classes comparison saved to: gradcam_different_classes.png")
     plt.close()
 
 
 def evaluate_model(model, test_data, test_labels):
-    """评估模型性能"""
+    """Evaluate model performance"""
     print("\n" + "=" * 70)
-    print("评估模型性能")
+    print("Evaluating model performance")
     print("=" * 70)
 
     input_tensor = Tensor(test_data)
@@ -302,54 +299,51 @@ def evaluate_model(model, test_data, test_labels):
     predictions = np.argmax(output.data, axis=1)
     accuracy = np.mean(predictions == test_labels)
 
-    print(f"\n测试集准确率: {accuracy:.4f}")
-    print(f"预测分布: {np.bincount(predictions, minlength=10)}")
-    print(f"真实分布: {np.bincount(test_labels, minlength=10)}")
+    print(f"\nTest accuracy: {accuracy:.4f}")
+    print(f"Prediction distribution: {np.bincount(predictions, minlength=10)}")
+    print(f"True distribution: {np.bincount(test_labels, minlength=10)}")
 
     return accuracy
 
 
 def main():
-    """主函数"""
+    """Main function"""
     print("=" * 70)
-    print("Grad-CAM 完整功能测试")
+    print("Grad-CAM Full Function Test (MNIST)")
     print("=" * 70)
 
-    print("\n1. 创建模型...")
-    model = SimpleCNN(in_channels=3, num_classes=10)
+    print("\n1. Creating model...")
+    model = SimpleCNN(in_channels=1, num_classes=10)
     params_list = list(model.params())
-    print(f"   ✓ 模型创建成功: {type(model).__name__}")
-    print(f"   ✓ 参数数量: {len(params_list)}")
+    print(f"   ✓ Model created: {type(model).__name__}")
+    print(f"   ✓ Number of parameters: {len(params_list)}")
 
-    print("\n2. 生成合成数据...")
-    train_data, train_labels = generate_synthetic_data(num_samples=500, img_size=32, num_classes=10)
-    test_data, test_labels = generate_synthetic_data(num_samples=50, img_size=32, num_classes=10)
-    print(f"   ✓ 训练集: {train_data.shape}")
-    print(f"   ✓ 测试集: {test_data.shape}")
+    print("\n2. Loading MNIST data...")
+    train_data, train_labels, test_data, test_labels = load_mnist_data(num_train=5000, num_test=500)
 
-    print("\n3. 快速训练模型...")
-    quick_train(model, train_data, train_labels, epochs=15, batch_size=25, lr=0.002)
+    print("\n3. Training model...")
+    quick_train(model, train_data, train_labels, epochs=10, batch_size=50, lr=0.002)
 
-    print("\n4. 评估模型...")
+    print("\n4. Evaluating model...")
     accuracy = evaluate_model(model, test_data, test_labels)
 
-    print("\n5. 测试 Grad-CAM (主要可视化)...")
-    visualize_gradcam(model, test_data, test_labels, model.conv3, save_path='gradcam_results.png')
+    print("\n5. Testing Grad-CAM (main visualization)...")
+    visualize_gradcam(model, test_data, test_labels, model.conv3, save_path='gradcam_results_mnist.png')
 
-    print("\n6. 测试不同层的 Grad-CAM...")
+    print("\n6. Testing Grad-CAM on different layers...")
     test_gradcam_on_different_layers(model, test_data, test_labels)
 
-    print("\n7. 测试不同类别的 Grad-CAM...")
+    print("\n7. Testing Grad-CAM for different classes...")
     test_gradcam_different_classes(model, test_data, test_labels)
 
     print("\n" + "=" * 70)
-    print("✅ 所有测试完成！")
+    print("✅ All tests completed!")
     print("=" * 70)
-    print("\n生成的文件:")
-    print("  - gradcam_results.png: Grad-CAM 主要可视化结果")
-    print("  - gradcam_different_layers.png: 不同层对比")
-    print("  - gradcam_different_classes.png: 不同类别对比")
-    print(f"\n模型准确率: {accuracy:.4f}")
+    print("\nGenerated files:")
+    print("  - gradcam_results_mnist.png: Main Grad-CAM visualization")
+    print("  - gradcam_different_layers.png: Different layers comparison")
+    print("  - gradcam_different_classes.png: Different classes comparison")
+    print(f"\nModel accuracy: {accuracy:.4f}")
 
 
 if __name__ == "__main__":

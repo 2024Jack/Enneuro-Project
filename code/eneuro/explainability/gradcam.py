@@ -11,15 +11,12 @@ https://arxiv.org/abs/1610.02391
 
 import numpy as np
 from typing import Dict, Optional, List
-import sys
-import os
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from eneuro.base import Tensor
-from eneuro.nn.module import Module, Layer
-from eneuro.base import functions as F
-from eneuro.utils import capture_features, capture_gradients
+from ..base import Tensor
+from ..nn.module import Module, Layer
+from ..base import functions as F
+from ..utils import capture_features, capture_gradients
+from ..utils.hooks import HookRegistry
 
 
 class GradCAM:
@@ -52,16 +49,8 @@ class GradCAM:
         self._feature_storage = None
         self._gradient_storage = None
 
-    def _register_hooks(self):
-        """注册特征图和梯度钩子"""
-        if self._feature_handle is not None:
-            return
-
-        self._feature_handle, self._feature_storage = capture_features(self.target_layer)
-        self._gradient_handle, self._gradient_storage = capture_gradients(self.target_layer)
-
     def _remove_hooks(self):
-        """移除所有钩子"""
+        """移除所有已注册的钩子"""
         if self._feature_handle is not None:
             self._feature_handle.remove()
             self._feature_handle = None
@@ -80,56 +69,102 @@ class GradCAM:
         """
         生成Grad-CAM热力图
 
+        实现说明
+        --------
+        当 target_layer 之后紧跟 BatchNorm 时，BN 的反向传播公式
+        会使 ∂L/∂(conv_output) 的空间均值严格为 0（每通道），
+        导致 alpha_k 全零、热力图全黑。
+
+        修复方案：在前向传播中追踪层调用顺序，找到 target_layer
+        的后继层（通常是 BN 层），在后继层的 backward hook 处捕获
+        梯度 gy = ∂L/∂(BN_output)——此时梯度尚未被 BN backward
+        处理，空间均值非零，alpha_k 有意义。
+
+        特征图仍取自 target_layer 的前向输出（conv 输出），
+        梯度取自后继层 backward 的 gy；两者空间分辨率相同，
+        Grad-CAM 公式依然成立。
+
         Args:
             input_tensor: 输入张量 (N, C, H, W)
-            class_idx: 目标类别索引，如果为None则使用预测类别
+            class_idx: 目标类别索引，为 None 时使用预测最高置信度类别
 
         Returns:
-            热力图 (H, W)，已归一化到[0,1]
+            热力图 (H, W)，已归一化到 [0, 1]
         """
-        self._register_hooks()
-
         try:
-            output = self.model(input_tensor)
+            # ── Step 1: 注册特征钩子，同时追踪层调用顺序 ──────────────────
+            self._feature_handle, self._feature_storage = capture_features(self.target_layer)
 
+            registry = HookRegistry()
+            registry.start_recording_sequence()
+            output = self.model(input_tensor)
+            registry.stop_recording_sequence()
+
+            # ── Step 2: 确定梯度捕获层 ─────────────────────────────────────
+            # 优先使用后继层（绕开 BN backward 使梯度均值归零的问题）
+            # 但只有当后继层与目标层类型兼容时才使用（通道数相同或都是卷积/BatchNorm）
+            gradient_layer = registry.get_successor_layer(self.target_layer)
+            
+            # 检查后继层是否与目标层兼容
+            if gradient_layer is not None:
+                target_layer_type = type(self.target_layer).__name__
+                successor_layer_type = type(gradient_layer).__name__
+                
+                # 只有当后继层是 BatchNorm 或同类型的卷积层时才使用
+                is_compatible = (
+                    ('BatchNorm' in successor_layer_type) or
+                    ('Conv' in target_layer_type and 'Conv' in successor_layer_type)
+                )
+                
+                if not is_compatible:
+                    gradient_layer = self.target_layer
+            else:
+                gradient_layer = self.target_layer
+
+            # 梯度钩子可在前向之后注册：backward 时按层的 _hook_manager 查找，
+            # 与前向时间无关，因此仍能被正确触发。
+            self._gradient_handle, self._gradient_storage = capture_gradients(gradient_layer)
+
+            # ── Step 3: 反向传播 ────────────────────────────────────────────
             if class_idx is None:
                 class_idx = int(np.argmax(output.data, axis=1)[0])
 
             target_logit = output[0, class_idx]
             target_logit.backward()
 
+            # ── Step 4: 取出特征图和梯度 ────────────────────────────────────
             activations = self._feature_storage['output']
             gradients = self._gradient_storage['grad_output']
 
             if activations is None:
                 raise RuntimeError(
-                    "未能捕获特征图。"
-                    "请确保目标层正确注册了钩子。"
+                    "未能捕获特征图。请确保目标层正确注册了钩子。"
                 )
-
             if gradients is None:
                 raise RuntimeError(
-                    "未能捕获梯度。"
-                    "请确保目标层支持梯度计算。"
+                    "未能捕获梯度。请确认后继层（BatchNorm/激活层）"
+                    "支持梯度计算，或手动指定 gradient_layer。"
                 )
 
-            activations = activations[0]
-            gradients = gradients[0]
+            # ── Step 5: Grad-CAM 核心计算 ───────────────────────────────────
+            # activations: (N, C, H, W) → 取第 0 个样本 → (C, H, W)
+            # gradients:   (N, C, H, W) → 取第 0 个样本 → (C, H, W)
+            activations = activations[0]   # (C, H, W)
+            gradients   = gradients[0]     # (C, H, W) 或 (C,)
 
-            if len(gradients.shape) == 4:
-                gradients = np.mean(gradients, axis=(2, 3))
-            elif len(gradients.shape) == 3:
-                gradients = np.mean(gradients, axis=(1, 2))
+            # α_k = GlobalAveragePool(∂Y^c / ∂A^k) → shape (C,)
+            if gradients.ndim == 3:
+                alpha_k_arr = gradients.mean(axis=(1, 2))   # (C,)
+            elif gradients.ndim == 2:
+                alpha_k_arr = gradients.mean(axis=1)        # (C,)
+            else:
+                alpha_k_arr = gradients                     # already (C,)
 
-            alpha_k = self._compute_weights(gradients)
+            # L = ReLU(Σ_k α_k · A^k)  — 向量化加权求和
+            # alpha_k_arr[:, None, None] broadcast 到 (C, H, W)
+            weights_sum = np.sum(alpha_k_arr[:, None, None] * activations, axis=0)  # (H, W)
 
-            weights_sum = sum(
-                alpha_k[k] * activations[k]
-                for k in range(activations.shape[0])
-            )
-
-            heatmap = F.relu(Tensor(weights_sum)).data
-
+            heatmap = np.maximum(0.0, weights_sum)   # ReLU
             heatmap = self._normalize_heatmap(heatmap)
 
             return heatmap
@@ -170,8 +205,9 @@ class GradCAM:
         min_val = np.min(heatmap)
         max_val = np.max(heatmap)
 
-        if max_val - min_val > 1e-5:
-            heatmap = (heatmap - min_val) / (max_val - min_val)
+        if max_val > 1e-8:
+            # 只需最大值非零即可归一化；min 在 ReLU 之后必然 >= 0
+            heatmap = heatmap / max_val
         else:
             heatmap = np.zeros_like(heatmap)
 

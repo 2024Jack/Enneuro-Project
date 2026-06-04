@@ -9,7 +9,7 @@ import numpy as np
 from eneuro.base import Tensor
 from eneuro.nn.module import Conv2d, Linear, Module, BatchNorm
 from eneuro.base import functions as F
-from explainability import GradCAM
+from eneuro.explainability import GradCAM
 
 
 class SimpleCNN(Module):
