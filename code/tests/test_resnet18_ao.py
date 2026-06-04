@@ -86,30 +86,59 @@ class ResNet18(Module):
 
 
 def test_resnet18_forward_backward():
-    """简单的前向与反向检查，确保形状与梯度通路正常。"""
-    np.random.seed(0)
-    model = ResNet18(num_classes=10)
+    print_gpu_mem()
+    
+    from eneuro.data import DataLoader
+    from eneuro.base.functions import has_cupy
+    import time
+    #'''
+    dataset = SteeringDataset(
+        root_dir="code/tests/testdata/data",
+        transform=lambda x: x.transpose(2, 0, 1)   # 可选：将 (H,W,C) 转为 (C,H,W)
+    )
+    batch_size = 32
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    #'''
+    
+    model = ResNet18(num_classes=20)
+    model.to('cuda' if has_cupy else 'cpu')
 
-    # 随机输入 (batch=2, 3, 224, 224)
-    x = np.random.randn(2, 3, 224, 224).astype(np.float32)
-    xt = as_Tensor(x)
+    optimizer = SGD(model.params())
+    loss_fn = crossEntropyError
 
-    # 前向
-    y = model(xt)
-    assert y.shape == (2, 10), f"ResNet18 输出形状错误: got={y.shape}"
+    tic = time.time()
+    for batch_idx, (images, labels) in enumerate(dataloader):
+    #for i in range(len(dataset)):
+        '''
+        sample_image, sample_label = dataset[0]
+        sample_image = np.ones_like(sample_image)
+        sample_label = np.ones_like(sample_label)
 
-    # 反向（简单平方和）并检查部分参数是否有梯度
-    loss = y * y
-    model.cleargrads()
-    loss.backward()
+        batch_data = [sample_image for i in range(batch_size)]
+        batch_target = [sample_label for i in range(batch_size)]
 
-    # 检查少量关键层是否有梯度
-    assert model.conv1.W.grad is not None, "conv1.W 未获得梯度"
-    # 检查某个 stage 的第一个 block 的 conv1 是否有梯度
-    first_block = model.layer2.layers[0]
-    assert first_block.conv1.W.grad is not None, "layer2 first block conv1 未获得梯度"
+        sample_image = np.stack(batch_data)
+        sample_label = np.stack(batch_target)
 
-    print("[PASS] test_resnet18_forward_backward")
+        batch_idx, (images, labels) = (i,(sample_image, sample_label))
+        images = as_Tensor(images)
+        #'''
+
+        y_pre = model(images)
+        
+        loss = y_pre * y_pre
+        loss.backward()
+
+        optimizer.step()
+        optimizer.zero_grad()
+
+        break
+    toc = time.time()
+    duration = toc - tic
+    print(f"[PASS] test_resnet18_forward_backward {duration:.4f}")
+    #import gc
+    #gc.collect()
+    print_gpu_mem()
 
 # -*- coding: utf-8 -*-
 import os
@@ -212,6 +241,7 @@ class SteeringDataset(Dataset):
             # 实际上 __init__ 已保证 target_transform 不为 None，此分支仅防御
             label = self._default_target_transform(angle)
 
+        #'''
         # 4. 转换为框架要求的 Tensor 类型
         img_tensor = as_Tensor(img)
         # 确保 label 是标量 Tensor
@@ -227,6 +257,9 @@ class SteeringDataset(Dataset):
             label_tensor = label_tensor.reshape(())
         else:
             raise ValueError(f"标签应为标量，但得到形状 {label_tensor.shape}")
+        #'''
+        #img_tensor = img
+        #label_tensor = label
 
         return img_tensor, label_tensor
 
@@ -247,11 +280,20 @@ class SteeringDataset(Dataset):
         idx = max(0, min(idx, num_classes - 1))
         return idx
 
+def print_gpu_mem():
+    from eneuro.base.functions import has_cupy
+    if has_cupy:
+        import cupy as cp
+        free, total = cp.cuda.Device().mem_info
+        used = total - free
+        print(f"GPU memory: used={used/1024**2:.1f}MB, free={free/1024**2:.1f}MB, total={total/1024**2:.1f}MB")
+
 def train(num_epoch=10, option='normal', autocast=False):
+    print_gpu_mem()
+
     batch_size = 32
 
-    from eneuro.base.core import Tensor
-    from eneuro.base.functions import get_array_module, to_xp, has_cupy
+    from eneuro.base.functions import has_cupy
     from eneuro.data import DataLoader
     import time
     # 实例化数据集
@@ -305,7 +347,6 @@ def train(num_epoch=10, option='normal', autocast=False):
 
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
-                optimizer.zero_grad()
 
             else:
                 if option == 'normal':
@@ -316,7 +357,8 @@ def train(num_epoch=10, option='normal', autocast=False):
             
                 loss.backward()
                 optimizer.step()
-                optimizer.zero_grad()
+
+            optimizer.zero_grad()
             
             #assert isinstance(y_pre, Tensor)
             pred_classes = np.argmax(y_pre.to('cpu').data, axis=1)
@@ -335,36 +377,51 @@ def train(num_epoch=10, option='normal', autocast=False):
         toc = time.time()
         duration = toc - tic
         print(f"\nEpoch completed in {duration:.4f}s\n")
+
+    #del model
+    #del optimizer
+    #import gc
+    #gc.collect()
+    print_gpu_mem()
     return duration
 
-
-if __name__ == '__main__':
-    #test_resnet18_forward_backward()
-
-    '''
+def test1():
     normal_t = train(num_epoch=1, option='normal', autocast=False)
     print(f"normal training complete in {normal_t:.4f}s")
-    #'''
 
-    '''
+def test2():
     normal_t = train(num_epoch=1, option='graph', autocast=False)
     print(f"graph training complete in {normal_t:.4f}s")
-    #'''
-    '''
+
+def test3():
     cast_t = train(num_epoch=1, option='graph', autocast=True)
     print(f"autocast graph training complete in {cast_t:.4f}s")
-    #'''
 
-    #sub = normal_t - cast_t
-    #print(f"混合精度节约了 {sub * 100 / normal_t:.2f}% 的时间")
-    '''
+def test4():
     normal_t = train(num_epoch=1, option='optim_graph', autocast=False)
     print(f"optim_graph training complete in {normal_t:.4f}s")
-    #'''
-    #'''
+
+def test5():
     cast_t = train(num_epoch=1, option='optim_graph', autocast=True)
     print(f"autocast optim_graph training complete in {cast_t:.4f}s")
+
+if __name__ == '__main__':
+    
+    '''
+    for i in range(1000):
+        test_resnet18_forward_backward()
     #'''
 
-    #sub = normal_t - cast_t
-    #print(f"混合精度节约了 {sub * 100 / normal_t:.2f}% 的时间")
+    #'''
+    for i in range(1):
+        test1()
+        test2()
+        test3()
+        test4()
+        test5()
+    #'''
+
+    '''
+    for i in range(10):
+        test2()
+    #'''
