@@ -160,7 +160,13 @@ model = Sequential(
 ### utils 模块
 
 - **StateDict**：状态字典，用于模型参数的序列化和反序列化
-- **visualization**：可视化工具
+- **visualization**：可视化工具，包含训练过程可视化和 Grad-CAM 可视化
+
+### explainability 模块
+
+- **GradCAM**：Grad-CAM 可解释性分析工具
+- **GuidedBackpropagation**：引导反向传播
+- **GuidedGradCAM**：Grad-CAM 与引导反向传播的融合
 
 ## API文档
 
@@ -201,6 +207,33 @@ loss = softmaxCrossEntropy(y_pred, y_true)
 ```
 
 ## 示例
+
+### Grad-CAM 可解释性分析
+
+EnNeuro 提供了完整的 Grad-CAM 可解释性分析工具，支持 Grad-CAM、Guided Backpropagation 和 Guided Grad-CAM 可视化。
+
+```python
+from eneuro.explainability import GradCAM, GuidedBackpropagation, GuidedGradCAM
+from eneuro.utils.visualization import GradCAMVisualizer
+
+# 创建模型
+model = SimpleCNN()
+
+# 创建 GradCAMVisualizer
+visualizer = GradCAMVisualizer(model)
+
+# 可视化单个图像
+result = visualizer.visualize(input_tensor, class_idx=0, save_path='gradcam.png')
+
+# 生成热力图叠加效果
+overlay = visualizer.generate_overlay(input_tensor, alpha=0.5)
+
+# 对比不同层的 Grad-CAM
+visualizer.visualize_layer_comparison(input_tensor, save_path='layers.png')
+
+# 对比同一图像对不同类别的响应
+visualizer.visualize_class_comparison(input_tensor, save_path='classes.png')
+```
 
 ### 训练MNIST分类模型
 

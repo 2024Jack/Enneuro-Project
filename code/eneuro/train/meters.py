@@ -16,6 +16,12 @@ class AverageMeter:
         self.count = 0
 
     def update(self, val, n=1):
+        # 统一转为 Python float，避免 numpy/cupy 标量流入 sum/avg，
+        # 导致后续 matplotlib 绘图时因无法隐式转换 cupy array 而崩溃。
+        if hasattr(val, 'item'):
+            val = val.item()   # numpy / cupy 0-d array → Python scalar
+        else:
+            val = float(val)
         self.val = val
         self.sum += val * n
         self.count += n

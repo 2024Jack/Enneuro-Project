@@ -497,7 +497,7 @@ class Module(Layer,StateDict):
         if 'training' in d:
             self.training = d['training']
 
-    # 辅助函数：仅处理numpy数组→纯列表（适配Tensor）
+    # 辅助函数：仅处理numpy/cupy数组→纯列表（适配Tensor）
     def _to_pure_list(self, tensor_like):
         if isinstance(tensor_like, np.ndarray):
             return tensor_like.tolist()

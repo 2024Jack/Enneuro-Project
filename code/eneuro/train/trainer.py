@@ -48,10 +48,14 @@ def _batch_accuracy(y_hat, yb, y_true_cls, loss_fn=None):
         return y_pred, y_true, batch_acc
 
     if y_hat.ndim > 1:
-        y_pred = y_hat.argmax(axis=1)
+        y_pred = y_hat.argmax(axis=1)          # Tensor.argmax 已返回原始 ndarray
     else:
-        y_pred = y_hat
-    y_true = y_true_cls
+        y_pred = y_hat.data if hasattr(y_hat, 'data') else y_hat
+
+    # 统一提取底层 ndarray，避免 cupy_array == Tensor 触发
+    # CuPy 的 __array_ufunc__ 协议（GPU 上不回退到反射运算符）
+    y_true = y_true_cls.data if hasattr(y_true_cls, 'data') else y_true_cls
+
     batch_acc = (y_pred == y_true).mean()
     return y_pred, y_true, batch_acc
 

@@ -301,11 +301,13 @@
                         <li><a href="#data-module">data 模块</a></li>
                         <li><a href="#train-module">train 模块</a></li>
                         <li><a href="#utils-module">utils 模块</a></li>
+                        <li><a href="#explainability-module">explainability 模块</a></li>
                     </ul>
                 </li>
                 <li class="menu-item">
                     <a href="#examples">示例代码</a>
                     <ul class="submenu">
+                        <li><a href="#gradcam-example">Grad-CAM 可解释性分析</a></li>
                         <li><a href="#lenet-example">LeNet 模型</a></li>
                         <li><a href="#training-example">模型训练与评估</a></li>
                     </ul>
@@ -830,11 +832,233 @@ optimizer.load_state_dict(checkpoint['optimizer'])
                         </div>
                     </div>
                 </div>
+                
+                <div class="api-item">
+                    <h4>GradCAMVisualizer</h4>
+                    <p>Grad-CAM 可视化器，提供 Grad-CAM、Guided Backpropagation 和 Guided Grad-CAM 的可视化功能。</p>
+                    <div class="api-params">
+                        <h5>参数</h5>
+                        <ul>
+                            <li><strong>model</strong> - 神经网络模型</li>
+                            <li><strong>target_layer</strong> - Grad-CAM 的目标层，默认为最后一个卷积层</li>
+                        </ul>
+                        <h5>方法</h5>
+                        <ul>
+                            <li><strong>visualize(input_tensor, class_idx, save_path, show)</strong> - 可视化单个图像</li>
+                            <li><strong>visualize_comparison(input_tensors, class_indices, save_path, show)</strong> - 对比多个图像</li>
+                            <li><strong>visualize_layer_comparison(input_tensor, layers, save_path, show)</strong> - 对比不同层</li>
+                            <li><strong>visualize_class_comparison(input_tensor, classes, save_path, show)</strong> - 对比不同类别</li>
+                            <li><strong>generate_overlay(input_tensor, class_idx, alpha, save_path, show)</strong> - 生成热力图叠加效果</li>
+                        </ul>
+                        <h5>示例</h5>
+                        <div class="code-block">
+from eneuro.utils.visualization import GradCAMVisualizer
+
+# 创建可视化器
+visualizer = GradCAMVisualizer(model)
+
+# 可视化单个图像
+result = visualizer.visualize(input_tensor, class_idx=0)
+
+# 生成叠加效果
+overlay = visualizer.generate_overlay(input_tensor, alpha=0.5)
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <h3 id="explainability-module">explainability 模块</h3>
+            <p>explainability 模块包含模型可解释性分析相关的类和函数。</p>
+            
+            <div class="api-item">
+                <h4>GradCAM</h4>
+                <p>Grad-CAM 实现，用于生成卷积神经网络的可视化热图。</p>
+                <div class="api-params">
+                    <h5>参数</h5>
+                    <ul>
+                        <li><strong>model</strong> - 神经网络模型</li>
+                        <li><strong>target_layer</strong> - 目标卷积层</li>
+                    </ul>
+                    <h5>方法</h5>
+                    <ul>
+                        <li><strong>generate(input_tensor, class_idx)</strong> - 生成 Grad-CAM 热力图</li>
+                    </ul>
+                    <h5>示例</h5>
+                    <div class="code-block">
+from eneuro.explainability import GradCAM
+
+# 创建 GradCAM
+gradcam = GradCAM(model, target_layer)
+
+# 生成热力图
+heatmap = gradcam.generate(input_tensor, class_idx=0)
+                    </div>
+                </div>
+            </div>
+            
+            <div class="api-item">
+                <h4>GuidedBackpropagation</h4>
+                <p>引导反向传播实现，用于生成细粒度的显著性图。</p>
+                <div class="api-params">
+                    <h5>参数</h5>
+                    <ul>
+                        <li><strong>model</strong> - 神经网络模型</li>
+                    </ul>
+                    <h5>方法</h5>
+                    <ul>
+                        <li><strong>generate(input_tensor, class_idx)</strong> - 生成引导反向传播结果</li>
+                    </ul>
+                    <h5>示例</h5>
+                    <div class="code-block">
+from eneuro.explainability import GuidedBackpropagation
+
+# 创建引导反向传播
+gbp = GuidedBackpropagation(model)
+
+# 生成显著性图
+saliency = gbp.generate(input_tensor, class_idx=0)
+                    </div>
+                </div>
+            </div>
+            
+            <div class="api-item">
+                <h4>GuidedGradCAM</h4>
+                <p>Grad-CAM 与引导反向传播的融合，生成增强的可视化效果。</p>
+                <div class="api-params">
+                    <h5>参数</h5>
+                    <ul>
+                        <li><strong>model</strong> - 神经网络模型</li>
+                        <li><strong>target_layer</strong> - 目标卷积层</li>
+                    </ul>
+                    <h5>方法</h5>
+                    <ul>
+                        <li><strong>generate(input_tensor, class_idx)</strong> - 生成 Guided Grad-CAM 结果</li>
+                    </ul>
+                    <h5>示例</h5>
+                    <div class="code-block">
+from eneuro.explainability import GuidedGradCAM
+
+# 创建 GuidedGradCAM
+guided_gradcam = GuidedGradCAM(model, target_layer)
+
+# 生成融合结果
+result = guided_gradcam.generate(input_tensor, class_idx=0)
+                    </div>
+                </div>
+            </div>
+            
+            <div class="api-item">
+                <h4>create_gradcam</h4>
+                <p>GradCAM 工厂函数，自动选择目标层。</p>
+                <div class="api-params">
+                    <h5>参数</h5>
+                    <ul>
+                        <li><strong>model</strong> - 神经网络模型</li>
+                    </ul>
+                    <h5>返回值</h5>
+                    <p>GradCAM 对象</p>
+                    <h5>示例</h5>
+                    <div class="code-block">
+from eneuro.explainability import create_gradcam
+
+gradcam = create_gradcam(model)
+heatmap = gradcam.generate(input_tensor, class_idx=0)
+                    </div>
+                </div>
+            </div>
+            
+            <div class="api-item">
+                <h4>suggest_target_layer</h4>
+                <p>自动建议 Grad-CAM 的目标层（最后一个卷积层）。</p>
+                <div class="api-params">
+                    <h5>参数</h5>
+                    <ul>
+                        <li><strong>model</strong> - 神经网络模型</li>
+                    </ul>
+                    <h5>返回值</h5>
+                    <p>建议的目标层</p>
+                    <h5>示例</h5>
+                    <div class="code-block">
+from eneuro.explainability import suggest_target_layer
+
+target_layer = suggest_target_layer(model)
+print(target_layer)
+                    </div>
+                </div>
             </div>
             
             <!-- 示例代码部分 -->
             <div class="section" id="examples">
                 <h2>示例代码</h2>
+                
+                <h3 id="gradcam-example">Grad-CAM 可解释性分析</h3>
+                <p>以下是使用 EnNeuro 进行 Grad-CAM 可解释性分析的完整示例：</p>
+                <div class="code-block">
+import numpy as np
+from eneuro.base import Tensor
+from eneuro.nn.module import Conv2d, Linear, Module, BatchNorm
+from eneuro.base import functions as F
+from eneuro.nn.optim import Adam
+from eneuro.nn.loss import CrossEntropyLoss
+from eneuro.explainability import GradCAM, GuidedGradCAM
+from eneuro.utils.visualization import GradCAMVisualizer
+
+# 定义模型
+class SimpleCNN(Module):
+    def __init__(self):
+        super().__init__()
+        self.conv1 = Conv2d(out_channels=16, kernel_size=3, stride=1, pad=1, in_channels=1)
+        self.bn1 = BatchNorm(16)
+        self.conv2 = Conv2d(out_channels=32, kernel_size=3, stride=1, pad=1)
+        self.bn2 = BatchNorm(32)
+        self.conv3 = Conv2d(out_channels=64, kernel_size=3, stride=1, pad=1)
+        self.bn3 = BatchNorm(64)
+        self.fc1 = Linear(128)
+        self.fc2 = Linear(10)
+
+    def forward(self, x):
+        x = F.relu(self.bn1(self.conv1(x)))
+        x = F.pooling(x, kernel_size=2, stride=2)
+        x = F.relu(self.bn2(self.conv2(x)))
+        x = F.pooling(x, kernel_size=2, stride=2)
+        x = F.relu(self.bn3(self.conv3(x)))
+        x = F.pooling(x, kernel_size=2, stride=2)
+        x = F.flatten(x)
+        x = F.relu(self.fc1(x))
+        x = self.fc2(x)
+        return x
+
+# 创建模型
+model = SimpleCNN()
+
+# 创建 GradCAMVisualizer
+visualizer = GradCAMVisualizer(model)
+
+# 准备输入数据 (batch_size, channels, height, width)
+input_tensor = Tensor(np.random.randn(1, 1, 28, 28))
+
+# 1. 可视化单个图像
+result = visualizer.visualize(input_tensor, class_idx=0, save_path='gradcam.png')
+print(f"预测类别: {result['predicted_class']}")
+print(f"热力图形状: {result['heatmap'].shape}")
+
+# 2. 生成热力图叠加效果
+overlay = visualizer.generate_overlay(input_tensor, alpha=0.5, save_path='overlay.png')
+
+# 3. 对比不同层的 Grad-CAM
+visualizer.visualize_layer_comparison(input_tensor, save_path='layers.png')
+
+# 4. 对比同一图像对不同类别的响应
+visualizer.visualize_class_comparison(input_tensor, save_path='classes.png')
+
+# 直接使用 GradCAM 类
+gradcam = GradCAM(model, model.conv3)
+heatmap = gradcam.generate(input_tensor, class_idx=0)
+
+# 使用 Guided Grad-CAM
+guided_gradcam = GuidedGradCAM(model, model.conv3)
+guided_result = guided_gradcam.generate(input_tensor, class_idx=0)
+                </div>
                 
                 <h3 id="lenet-example">LeNet 模型</h3>
                 <p>以下是使用 EnNeuro 实现 LeNet 模型的示例：</p>
