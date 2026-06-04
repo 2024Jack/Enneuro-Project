@@ -13,3 +13,5 @@ from . import train
 __all__.append('train')
 from . import ao
 __all__.append('ao')
+from . import explainability
+__all__.append('explainability')
