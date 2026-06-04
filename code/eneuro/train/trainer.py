@@ -68,14 +68,102 @@ class Trainer:
 
         # 早停
         self.enable_early_stop = enable_early_stop
+        self._early_stop_initialized = False
 
-    def init_early_stop(self, patience=5, mode='loss'):
+    def init_early_stop(self, patience=5, mode='loss', min_delta=0.0, restore_best_weights=True):
+        """
+        初始化早停机制
+        
+        参数:
+            patience: 容忍指标不提升的最大epoch数
+            mode: 监控指标类型，'loss'表示越小越好，'acc'表示越大越好
+            min_delta: 认为有改善的最小阈值，小于此值的变化不算改善
+            restore_best_weights: 早停时是否恢复到最佳模型权重
+        """
+        if mode not in ['loss', 'acc']:
+            raise ValueError(f"mode must be 'loss' or 'acc', got {mode}")
+        
         self.patience = patience
         self.mode = mode
+        self.min_delta = min_delta
+        self.restore_best_weights = restore_best_weights
         self.best_val_loss = np.inf
-        self.best_val_acc = 0
+        self.best_val_acc = 0.0
         self.epochs_no_improve = 0
         self.best_weights = None
+        self._early_stop_initialized = True
+
+    def _save_best_weights(self):
+        """保存当前模型权重到最佳权重缓存"""
+        self.best_weights = {}
+        for param in self.model.get_params_list():
+            if param.data is not None:
+                self.best_weights[id(param)] = param.data.copy()
+    
+    def _restore_best_weights(self):
+        """从最佳权重缓存恢复模型权重"""
+        if self.best_weights is None:
+            return
+        
+        for param in self.model.get_params_list():
+            if param.data is not None and id(param) in self.best_weights:
+                param.data[:] = self.best_weights[id(param)]
+
+    def _check_early_stop(self, loss, acc, epoch, verbose):
+        """
+        检查是否应该早停
+        
+        返回:
+            bool: True表示应该停止训练
+        """
+        if not self.enable_early_stop:
+            return False
+        
+        if not self._early_stop_initialized:
+            if verbose:
+                print("Warning: Early stopping enabled but not initialized. Call init_early_stop() first.")
+            return False
+        
+        improved = False
+        
+        if self.mode == 'loss':
+            if loss < self.best_val_loss - self.min_delta:
+                improved = True
+                self.best_val_loss = loss
+                if verbose:
+                    print(f"  -> Validation loss improved to {loss:.4f}")
+        elif self.mode == 'acc':
+            if acc > self.best_val_acc + self.min_delta:
+                improved = True
+                self.best_val_acc = acc
+                if verbose:
+                    print(f"  -> Validation accuracy improved to {acc:.4f}")
+        
+        if improved:
+            self.epochs_no_improve = 0
+            if self.restore_best_weights:
+                self._save_best_weights()
+        else:
+            self.epochs_no_improve += 1
+            if verbose:
+                print(f"  -> No improvement for {self.epochs_no_improve} epoch(s)")
+        
+        if self.epochs_no_improve >= self.patience:
+            if verbose:
+                print(f"\n{'='*60}")
+                print(f"Early stopping triggered after {epoch+1} epochs")
+                print(f"Best {'loss' if self.mode == 'loss' else 'accuracy'}: "
+                      f"{self.best_val_loss:.4f if self.mode == 'loss' else self.best_val_acc:.4f}")
+                print(f"{'='*60}")
+            
+            if self.restore_best_weights and self.best_weights is not None:
+                if verbose:
+                    print("Restoring best model weights...")
+                self._restore_best_weights()
+            
+            return True
+        
+        return False
 
 
     def fit(self, train_loader, val_loader, epochs=10, batch_size=32, 
@@ -126,27 +214,8 @@ class Trainer:
                     print(f"Checkpoint saved to {checkpoint_path}")
             
             # 早停
-            # if self.enable_early_stop:
-            #     if self.mode == 'loss':
-            #         if loss < self.best_val_loss:
-            #             self.best_val_loss = loss
-            #             self.best_weights = self.model.get_params()
-            #             self.epochs_no_improve = 0
-            #         else:
-            #             self.epochs_no_improve += 1
-            #     elif self.mode == 'acc':
-            #         if acc > self.best_val_acc:
-            #             self.best_val_acc = acc
-            #             self.best_weights = self.model.get_params()
-            #             self.epochs_no_improve = 0
-            #         else:
-            #             self.epochs_no_improve += 1
-            #     else:
-            #         raise ValueError(f"Invalid mode: {self.mode}")
-                
-            #     if self.epochs_no_improve >= self.patience:
-            #         print(f"Early stopping after {epoch+1} epochs")
-            #         break
+            if self._check_early_stop(loss, acc, epoch, verbose):
+                break
 
     def _one_step(self, data_loader, batch_size=32, training=True, verbose=True, device='cpu'):
         loss_sum, acc_sum, sample_num = 0., 0, 0
